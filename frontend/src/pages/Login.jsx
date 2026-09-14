@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import {
   Mail,
@@ -9,13 +9,21 @@ import {
   ArrowRight,
   Check,
   ShieldCheck,
+  Users,
+  ChevronDown,
 } from "lucide-react";
 
 import api from "../services/api";
+import { useAuth } from "../context/AuthContext";
 
 
 function Login() {
   const navigate = useNavigate();
+  const { syncAuthFromStorage } = useAuth();
+
+  // =========================================================
+  // STATE
+  // =========================================================
 
   const [email, setEmail] = useState(
     localStorage.getItem("rememberedEmail") || ""
@@ -31,101 +39,247 @@ function Login() {
 
   const [error, setError] = useState("");
 
+  // =========================================================
+  // ROLE SELECTION
+  // =========================================================
 
-  // =========================================
+  const [selectedRole, setSelectedRole] = useState("");
+
+  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+
+  const roles = [
+    "Admin",
+    "NAAC Coordinator",
+    "Committee Member",
+    "Dept. Coordinator",
+    "Reviewer",
+    "Data Approver",
+    "Principal / Director",
+  ];
+
+  // =========================================================
   // LOGIN
-  // =========================================
+  // =========================================================
 
- const handleLogin = async (event) => {
-  event.preventDefault();
+  const handleLogin = async (event) => {
+    event.preventDefault();
 
-  setError("");
-  setLoading(true);
+    setError("");
 
-  const loginEmail = email.trim();
+    // ---------------------------------------------------------
+    // Check role selection
+    // ---------------------------------------------------------
 
-  console.log("========== LOGIN DEBUG ==========");
-  console.log("Email:", JSON.stringify(loginEmail));
-  console.log("Password:", JSON.stringify(password));
-  console.log("Password length:", password.length);
-  console.log("=================================");
+    if (!selectedRole) {
+      setError("Please select your user type.");
+      return;
+    }
 
-  try {
-    const response = await api.post("/auth/login", {
+    // ---------------------------------------------------------
+    // Check email and password
+    // ---------------------------------------------------------
+
+    const loginEmail = email.trim();
+
+    if (!loginEmail || !password) {
+      setError("Please enter your email and password.");
+      return;
+    }
+
+    setLoading(true);
+
+    // ---------------------------------------------------------
+    // Login information for development
+    // Do NOT log the password.
+    // ---------------------------------------------------------
+
+    console.log("Login attempt:", {
       email: loginEmail,
-      password: password,
+      role: selectedRole,
     });
 
-    const data = response.data;
+    try {
+      // -------------------------------------------------------
+      // Send login request to backend
+      // -------------------------------------------------------
 
-    console.log("Login successful:", data);
+      const response = await api.post("/auth/login", {
+        email: loginEmail,
+        password: password,
+        role: selectedRole,
+      });
 
-    // Save JWT token
-    localStorage.setItem(
-      "accessToken",
-      data.access_token
-    );
+      const data = response.data;
 
-    // Save user information
-    localStorage.setItem(
-      "user",
-      JSON.stringify(data.user)
-    );
+      console.log("LOGIN RESPONSE:", data);
+      console.log("AUTHENTICATED ROLE:", data.user?.role);
+      console.log("TOKEN:", data.access_token);
 
-    // Remember email only
-    if (rememberMe) {
+      const authenticatedRole = data.user?.role;
+
+      // -------------------------------------------------------
+      // Normalize roles for comparison
+      // -------------------------------------------------------
+
+      const normalizeRole = (r) => {
+        if (!r) return "";
+
+        const clean = r
+          .trim()
+          .toLowerCase()
+          .replace(/[\.\/_\-\s]/g, "");
+
+        if (
+          clean === "departmentcoordinator" ||
+          clean === "deptcoordinator"
+        ) {
+          return "deptcoordinator";
+        }
+
+        if (
+          clean === "principaldirector" ||
+          clean === "principal"
+        ) {
+          return "principaldirector";
+        }
+
+        if (
+          clean === "naaccoordinator" ||
+          clean === "coordinator"
+        ) {
+          return "naaccoordinator";
+        }
+
+        return clean;
+      };
+
+      // -------------------------------------------------------
+      // Role validation
+      // Selected role MUST match actual account role
+      // -------------------------------------------------------
+
+      if (
+        normalizeRole(selectedRole) !==
+        normalizeRole(authenticatedRole)
+      ) {
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("user");
+        localStorage.removeItem("selectedRole");
+
+        setError(
+          "Selected role does not match your account role."
+        );
+
+        return;
+      }
+
+      // -------------------------------------------------------
+      // Save JWT token
+      // -------------------------------------------------------
+
       localStorage.setItem(
-        "rememberedEmail",
-        loginEmail
+        "accessToken",
+        data.access_token
       );
-    } else {
-      localStorage.removeItem("rememberedEmail");
+
+      // -------------------------------------------------------
+      // Save user information
+      // -------------------------------------------------------
+
+      localStorage.setItem(
+        "user",
+        JSON.stringify(data.user)
+      );
+
+      // -------------------------------------------------------
+      // Save verified role
+      // -------------------------------------------------------
+
+      localStorage.setItem(
+        "selectedRole",
+        authenticatedRole || selectedRole
+      );
+
+      // -------------------------------------------------------
+      // Sync authentication context
+      // -------------------------------------------------------
+
+      syncAuthFromStorage();
+
+      // -------------------------------------------------------
+      // Remember email
+      // -------------------------------------------------------
+
+      if (rememberMe) {
+        localStorage.setItem(
+          "rememberedEmail",
+          loginEmail
+        );
+      } else {
+        localStorage.removeItem("rememberedEmail");
+      }
+
+      // -------------------------------------------------------
+      // Redirect
+      // -------------------------------------------------------
+
+      if (authenticatedRole === "Admin") {
+        console.log(
+          "REDIRECTING TO ADMIN DASHBOARD"
+        );
+
+        navigate("/admin-dashboard");
+      } else {
+        console.log(
+          "REDIRECTING TO NORMAL DASHBOARD"
+        );
+
+        navigate("/dashboard");
+      }
+
+    } catch (error) {
+      // -------------------------------------------------------
+      // Login error
+      // -------------------------------------------------------
+
+      console.error("LOGIN FAILED:", error);
+
+      if (error.response) {
+        console.error(
+          "Backend status:",
+          error.response.status
+        );
+
+        console.error(
+          "Backend response:",
+          error.response.data
+        );
+
+        setError(
+          error.response.data?.detail ||
+          "Invalid email, password, or user type."
+        );
+      } else {
+        setError(
+          "Unable to connect to the backend server."
+        );
+      }
+
+    } finally {
+      setLoading(false);
     }
+  };
 
-    // Go to role selection
-    navigate("/select-role");
-
-  } catch (error) {
-    console.error("LOGIN FAILED:", error);
-
-    if (error.response) {
-      console.error(
-        "Backend status:",
-        error.response.status
-      );
-
-      console.error(
-        "Backend response:",
-        error.response.data
-      );
-
-      setError(
-        error.response.data?.detail ||
-        "Invalid email or password"
-      );
-
-    } else {
-      setError(
-        "Unable to connect to the backend server."
-      );
-    }
-
-  } finally {
-    setLoading(false);
-  }
-};
-
-
-  // =========================================
+  // =========================================================
   // UI
-  // =========================================
+  // =========================================================
 
   return (
     <div className="login-page">
 
-      {/* =========================================
+      {/* =====================================================
           LEFT SIDE
-      ========================================= */}
+      ===================================================== */}
 
       <section className="login-brand-section">
 
@@ -244,7 +398,7 @@ function Login() {
               </strong>
 
               <span>
-                automated upon authentication
+                verified during authentication
               </span>
 
             </div>
@@ -318,9 +472,9 @@ function Login() {
       </section>
 
 
-      {/* =========================================
+      {/* =====================================================
           RIGHT SIDE
-      ========================================= */}
+      ===================================================== */}
 
       <section className="login-form-section">
 
@@ -359,11 +513,214 @@ function Login() {
           </div>
 
 
-          {/* Login Form */}
+          {/* =================================================
+              LOGIN FORM
+          ================================================= */}
 
           <form onSubmit={handleLogin}>
 
-            {/* EMAIL */}
+            {/* =================================================
+                SIGN IN AS
+            ================================================= */}
+
+            <div className="field">
+
+              <div
+                className="field-label"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
+              >
+
+                <label>
+                  SIGN IN AS *
+                </label>
+
+                <span
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    padding: "4px 9px",
+                    border: "1px solid #cdd8ff",
+                    borderRadius: "7px",
+                    background: "#f4f6ff",
+                    color: "#5268c9",
+                    fontSize: "11px",
+                    fontWeight: "600",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <ShieldCheck size={13} />
+                  Active RBAC Routing
+                </span>
+
+              </div>
+
+
+              {/* Role Dropdown */}
+
+              <div
+                style={{
+                  position: "relative",
+                }}
+              >
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setRoleDropdownOpen(
+                      !roleDropdownOpen
+                    )
+                  }
+                  className="input-container"
+                  style={{
+                    width: "100%",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    textAlign: "left",
+                    fontFamily: "inherit",
+                  }}
+                >
+
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "11px",
+                      color: selectedRole
+                        ? "#172033"
+                        : "#64748b",
+                    }}
+                  >
+
+                    <Users
+                      size={17}
+                      style={{
+                        color: "#64748b",
+                        flexShrink: 0,
+                      }}
+                    />
+
+                    <span>
+                      {selectedRole ||
+                        "Select institutional role"}
+                    </span>
+
+                  </span>
+
+
+                  <ChevronDown
+                    size={18}
+                    style={{
+                      color: "#64748b",
+                      transform: roleDropdownOpen
+                        ? "rotate(180deg)"
+                        : "rotate(0deg)",
+                      transition:
+                        "transform 0.2s ease",
+                    }}
+                  />
+
+                </button>
+
+
+                {/* Dropdown Options */}
+
+                {roleDropdownOpen && (
+
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 6px)",
+                      left: 0,
+                      right: 0,
+                      zIndex: 1000,
+                      background: "#ffffff",
+                      border: "1px solid #d7deea",
+                      borderRadius: "10px",
+                      padding: "6px",
+                      boxShadow:
+                        "0 10px 25px rgba(15, 23, 42, 0.12)",
+                    }}
+                  >
+
+                    {roles.map((role) => (
+
+                      <button
+                        key={role}
+                        type="button"
+                        onClick={() => {
+                          setSelectedRole(role);
+                          setRoleDropdownOpen(false);
+                          setError("");
+                        }}
+                        style={{
+                          width: "100%",
+                          border: "none",
+                          background:
+                            selectedRole === role
+                              ? "#f1f5ff"
+                              : "transparent",
+                          borderRadius: "7px",
+                          padding: "10px 12px",
+                          textAlign: "left",
+                          cursor: "pointer",
+                          color:
+                            selectedRole === role
+                              ? "#4058b8"
+                              : "#172033",
+                          fontSize: "14px",
+                          fontWeight:
+                            selectedRole === role
+                              ? "600"
+                              : "400",
+                          fontFamily: "inherit",
+                          transition:
+                            "background 0.15s ease",
+                        }}
+                        onMouseEnter={(event) => {
+
+                          if (
+                            selectedRole !== role
+                          ) {
+                            event.currentTarget.style.background =
+                              "#f8fafc";
+                          }
+
+                        }}
+                        onMouseLeave={(event) => {
+
+                          if (
+                            selectedRole !== role
+                          ) {
+                            event.currentTarget.style.background =
+                              "transparent";
+                          }
+
+                        }}
+                      >
+                        {role}
+                      </button>
+
+                    ))}
+
+                  </div>
+
+                )}
+
+              </div>
+
+            </div>
+
+
+            {/* =================================================
+                EMAIL
+            ================================================= */}
 
             <div className="field">
 
@@ -399,7 +756,9 @@ function Login() {
             </div>
 
 
-            {/* PASSWORD */}
+            {/* =================================================
+                PASSWORD
+            ================================================= */}
 
             <div className="field">
 
@@ -439,7 +798,9 @@ function Login() {
                   type="button"
                   className="eye-button"
                   onClick={() =>
-                    setShowPassword(!showPassword)
+                    setShowPassword(
+                      !showPassword
+                    )
                   }
                 >
 
@@ -456,7 +817,9 @@ function Login() {
             </div>
 
 
-            {/* OPTIONS */}
+            {/* =================================================
+                OPTIONS
+            ================================================= */}
 
             <div className="login-options">
 
@@ -481,6 +844,9 @@ function Login() {
 
               <button
                 type="button"
+                onClick={() =>
+                  navigate("/forgot-password")
+                }
                 className="forgot-button"
               >
                 Forgot Password?
@@ -489,16 +855,22 @@ function Login() {
             </div>
 
 
-            {/* ERROR */}
+            {/* =================================================
+                ERROR
+            ================================================= */}
 
             {error && (
+
               <div className="login-error">
                 {error}
               </div>
+
             )}
 
 
-            {/* SIGN IN */}
+            {/* =================================================
+                SIGN IN
+            ================================================= */}
 
             <button
               type="submit"
@@ -520,7 +892,9 @@ function Login() {
           </form>
 
 
-          {/* SECURITY */}
+          {/* =================================================
+              SECURITY
+          ================================================= */}
 
           <div className="secure-message">
 
@@ -534,7 +908,9 @@ function Login() {
           </div>
 
 
-          {/* OR */}
+          {/* =================================================
+              OR
+          ================================================= */}
 
           <div className="or-divider">
 
@@ -549,7 +925,9 @@ function Login() {
           </div>
 
 
-          {/* GOOGLE WORKSPACE */}
+          {/* =================================================
+              GOOGLE WORKSPACE
+          ================================================= */}
 
           <button
             type="button"
@@ -565,22 +943,26 @@ function Login() {
           </button>
 
 
-          {/* CONTACT */}
+          {/* =================================================
+              REGISTRATION
+          ================================================= */}
 
           <div className="contact-text">
 
             Don't have an account?
 
-            <button type="button">
-              Contact your institution administrator
-            </button>
+            <Link to="/register">
+              Create an account
+            </Link>
 
           </div>
 
         </div>
 
 
-        {/* ROLE INFORMATION */}
+        {/* =====================================================
+            ROLE INFORMATION
+        ===================================================== */}
 
         <div className="role-info-box">
 
@@ -591,22 +973,22 @@ function Login() {
           <p>
 
             <strong>
-              Autonomous Role Assignment:
+              Role-Based Access:
             </strong>{" "}
 
-            Your access level
-            (Coordinator, Committee Member,
-            Department Lead, Reviewer, Approver,
-            Director, or Admin) will be
-            automatically authenticated from
-            your institutional directory.
+            Your selected user type is verified
+            against your institutional account
+            and assigned permissions before
+            access is granted.
 
           </p>
 
         </div>
 
 
-        {/* FOOTER */}
+        {/* =====================================================
+            FOOTER
+        ===================================================== */}
 
         <div className="form-footer">
 

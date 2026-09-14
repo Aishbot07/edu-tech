@@ -1,4 +1,8 @@
-from pydantic import BaseModel, EmailStr 
-class LoginRequest(BaseModel): 
- email: EmailStr 
- password: str
+from pydantic import BaseModel
+from typing import Optional
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+    role: Optional[str] = None

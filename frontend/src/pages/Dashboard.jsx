@@ -1,34 +1,34 @@
 import React from "react";
+import { useAuth } from "../context/AuthContext";
+import { ROLES } from "../config/roles";
+import CoordinatorView from "./RoleDashboards/CoordinatorView";
+import CommitteeMemberView from "./RoleDashboards/CommitteeMemberView";
+import DeptCoordinatorView from "./RoleDashboards/DeptCoordinatorView";
+import ReviewerView from "./RoleDashboards/ReviewerView";
+import DataApproverView from "./RoleDashboards/DataApproverView";
+import PrincipalDirectorView from "./RoleDashboards/PrincipalDirectorView";
+import AdminView from "./RoleDashboards/AdminView";
 
 function Dashboard() {
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "#f8f9fc",
-        fontFamily: "Arial, sans-serif",
-      }}
-    >
-      <div
-        style={{
-          background: "#ffffff",
-          padding: "40px",
-          borderRadius: "16px",
-          boxShadow: "0 10px 30px rgba(0, 0, 0, 0.08)",
-          textAlign: "center",
-        }}
-      >
-        <h1>EduVerse NAAC Dashboard</h1>
+  const { activeRole } = useAuth();
 
-        <p>
-          Welcome to your accreditation management dashboard.
-        </p>
-      </div>
-    </div>
-  );
+  switch (activeRole) {
+    case ROLES.ADMIN:
+      return <AdminView />;
+    case ROLES.COMMITTEE_MEMBER:
+      return <CommitteeMemberView />;
+    case ROLES.DEPT_COORDINATOR:
+      return <DeptCoordinatorView />;
+    case ROLES.REVIEWER:
+      return <ReviewerView />;
+    case ROLES.DATA_APPROVER:
+      return <DataApproverView />;
+    case ROLES.PRINCIPAL_DIRECTOR:
+      return <PrincipalDirectorView />;
+    case ROLES.COORDINATOR:
+    default:
+      return <CoordinatorView />;
+  }
 }
 
 export default Dashboard;

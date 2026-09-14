@@ -32,6 +32,12 @@ class User(Base):
         nullable=True
     )
 
+    faculty_id = Column(
+        Integer,
+        ForeignKey("faculties.id"),
+        nullable=True
+    )
+
     department_id = Column(
         Integer,
         nullable=True

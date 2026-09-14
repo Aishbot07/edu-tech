@@ -1,31 +1,52 @@
 from app.db.database import SessionLocal
-from app.models import Role, Permission, Module, RoleModulePermission
+from app.models import (
+    Role,
+    Permission,
+    Module,
+    RoleModulePermission
+)
 
 
 def get_role(db, name):
-    return db.query(Role).filter(Role.name == name).first()
+    return db.query(Role).filter(
+        Role.name == name
+    ).first()
 
 
 def get_permission(db, name):
-    return db.query(Permission).filter(Permission.name == name).first()
+    return db.query(Permission).filter(
+        Permission.name == name
+    ).first()
 
 
 def get_module(db, code):
-    return db.query(Module).filter(Module.code == code).first()
+    return db.query(Module).filter(
+        Module.code == code
+    ).first()
 
 
-def add_permission(db, role_name, module_code, permission_name):
+def add_permission(
+    db,
+    role_name,
+    module_code,
+    permission_name
+):
     role = get_role(db, role_name)
     module = get_module(db, module_code)
     permission = get_permission(db, permission_name)
 
     if not role or not module or not permission:
         print(
-            f"Skipping: {role_name} → {module_code} → {permission_name}"
+            f"Skipping: "
+            f"{role_name} → "
+            f"{module_code} → "
+            f"{permission_name}"
         )
         return
 
-    existing = db.query(RoleModulePermission).filter(
+    existing = db.query(
+        RoleModulePermission
+    ).filter(
         RoleModulePermission.role_id == role.id,
         RoleModulePermission.module_id == module.id,
         RoleModulePermission.permission_id == permission.id
@@ -68,7 +89,8 @@ def seed_role_permissions():
             "REPORTS",
             "ANALYTICS",
             "ACCREDITATION_CYCLES",
-            "USER_MANAGEMENT"
+            "USER_MANAGEMENT",
+            "INSTITUTION_MANAGEMENT"
         ]
 
         admin_permissions = [
@@ -127,10 +149,23 @@ def seed_role_permissions():
             for permission in coordinator_permissions:
                 add_permission(
                     db,
-                    "Coordinator",
+                    "NAAC Coordinator",
                     module,
                     permission
                 )
+
+        # Institution Management - Coordinator
+        for permission in [
+            "View",
+            "Create",
+            "Edit"
+        ]:
+            add_permission(
+                db,
+                "NAAC Coordinator",
+                "INSTITUTION_MANAGEMENT",
+                permission
+            )
 
         # ==========================================
         # COMMITTEE MEMBER
@@ -151,12 +186,22 @@ def seed_role_permissions():
             "REPORTS"
         ]
 
+        # Cleanup any existing write/submit permissions for Committee Member
+        committee_role = get_role(db, "Committee Member")
+        if committee_role:
+            unwanted_perms = db.query(Permission).filter(
+                Permission.name.in_(["Create", "Edit", "Upload", "Submit", "Delete", "Approve"])
+            ).all()
+            unwanted_ids = [p.id for p in unwanted_perms]
+            db.query(RoleModulePermission).filter(
+                RoleModulePermission.role_id == committee_role.id,
+                RoleModulePermission.permission_id.in_(unwanted_ids)
+            ).delete(synchronize_session=False)
+            db.commit()
+
         committee_permissions = [
             "View",
-            "Create",
-            "Edit",
-            "Upload",
-            "Submit"
+            "Review"
         ]
 
         for module in committee_modules:
@@ -167,6 +212,13 @@ def seed_role_permissions():
                     module,
                     permission
                 )
+
+        add_permission(
+            db,
+            "Committee Member",
+            "INSTITUTION_MANAGEMENT",
+            "View"
+        )
 
         # ==========================================
         # DEPARTMENT COORDINATOR
@@ -203,6 +255,13 @@ def seed_role_permissions():
                     permission
                 )
 
+        add_permission(
+            db,
+            "Dept. Coordinator",
+            "INSTITUTION_MANAGEMENT",
+            "View"
+        )
+
         # ==========================================
         # REVIEWER
         # ==========================================
@@ -234,6 +293,13 @@ def seed_role_permissions():
                     module,
                     permission
                 )
+
+        add_permission(
+            db,
+            "Reviewer",
+            "INSTITUTION_MANAGEMENT",
+            "View"
+        )
 
         # ==========================================
         # DATA APPROVER
@@ -269,6 +335,13 @@ def seed_role_permissions():
                     module,
                     permission
                 )
+
+        add_permission(
+            db,
+            "Data Approver",
+            "INSTITUTION_MANAGEMENT",
+            "View"
+        )
 
         # ==========================================
         # PRINCIPAL / DIRECTOR
@@ -307,9 +380,23 @@ def seed_role_permissions():
                     permission
                 )
 
+        add_permission(
+            db,
+            "Principal / Director",
+            "INSTITUTION_MANAGEMENT",
+            "View"
+        )
+
+        # ==========================================
+        # SAVE
+        # ==========================================
+
         db.commit()
 
-        print("Role-module-permission mapping created successfully!")
+        print(
+            "Role-module-permission mapping "
+            "created successfully!"
+        )
 
     except Exception as e:
         db.rollback()

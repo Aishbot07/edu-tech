@@ -3,9 +3,11 @@ import { useNavigate } from "react-router-dom";
 import {
   ShieldCheck,
   Building2,
-  GraduationCap,
+  Users,
   ClipboardList,
   Landmark,
+  FileCheck2,
+  UserCog,
   ArrowRight,
   Check,
   Lock,
@@ -16,68 +18,115 @@ import {
 import api from "../services/api";
 import "./SelectRole.css";
 
+
+/* =====================================================
+   ALL 7 EDUVERSE NAAC ROLES
+===================================================== */
+
 const roles = [
   {
     id: 1,
-    key: "naac",
+    key: "admin",
+    title: "Admin",
+    badge: "SYSTEM ADMIN",
+    backendName: "Admin",
+    description:
+      "Manage institutions, users, roles, permissions, accreditation settings, and overall system configuration.",
+    summary:
+      "You'll enter the Admin workspace with system-wide management, user administration, permissions, and institutional configuration access.",
+    color: "blue",
+    icon: UserCog,
+  },
+
+  {
+    id: 2,
+    key: "coordinator",
     title: "NAAC Coordinator",
-    badge: "FULL SCOPE",
+    badge: "ACCREDITATION",
+    backendName: "NAAC Coordinator",
     description:
       "Coordinate institution-wide NAAC activities, monitor accreditation progress, manage criteria-level work and oversee submissions.",
     summary:
-      "You'll enter the NAAC Coordinator workspace with institution-wide accreditation management and SSR submission access.",
-    color: "blue",
+      "You'll enter the Coordinator workspace with institution-wide accreditation management, criteria, evidence, and submission access.",
+    color: "indigo",
     icon: ShieldCheck,
   },
+
   {
     id: 3,
-    key: "dept",
-    title: "Department Coordinator",
-    badge: "DEPT LEAD",
+    key: "committee-member",
+    title: "Committee Member",
+    badge: "COMMITTEE",
+    backendName: "Committee Member",
     description:
-      "Manage NAAC activities for your department, coordinate faculty contributions and track department-level evidence.",
+      "Participate in committees, review criteria, evaluate evidence, and contribute to accreditation activities.",
     summary:
-      "You'll enter the Department Coordinator workspace to monitor departmental criteria tasks and faculty evidence.",
-    color: "indigo",
-    icon: Building2,
-  },
-  {
-    id: 2,
-    key: "faculty",
-    title: "Faculty / Staff",
-    badge: "CONTRIBUTOR",
-    description:
-      "Submit academic and institutional information, upload evidence and complete assigned NAAC activities.",
-    summary:
-      "You'll enter the Faculty workspace to fulfill assigned metrics, upload academic artifacts, and review feedback.",
+      "You'll enter the Committee Member workspace to participate in assigned committees, review criteria, and evaluate institutional evidence.",
     color: "teal",
-    icon: GraduationCap,
+    icon: Users,
   },
+
   {
     id: 4,
-    key: "iqac",
-    title: "IQAC Administrator",
-    badge: "QUALITY CELL",
+    key: "dept-coordinator",
+    title: "Dept. Coordinator",
+    badge: "DEPARTMENT",
+    backendName: "Dept. Coordinator",
     description:
-      "Manage quality assurance activities, institutional data, compliance workflows and accreditation documentation.",
+      "Manage department-level criteria, metrics, evidence, faculty contributions, and departmental submissions.",
     summary:
-      "You'll enter the IQAC Quality Assurance console to review compliance workflows and institutional benchmarks.",
+      "You'll enter the Department Coordinator workspace to manage departmental criteria, metrics, evidence, and submissions.",
     color: "purple",
+    icon: Building2,
+  },
+
+  {
+    id: 5,
+    key: "reviewer",
+    title: "Reviewer",
+    badge: "REVIEW",
+    backendName: "Reviewer",
+    description:
+      "Review submitted evidence, provide comments, evaluate information, and track review status.",
+    summary:
+      "You'll enter the Reviewer workspace to review assigned evidence, provide feedback, and track review activities.",
+    color: "amber",
     icon: ClipboardList,
   },
+
   {
     id: 6,
-    key: "principal",
-    title: "Principal / Head",
-    badge: "EXECUTIVE",
+    key: "data-approver",
+    title: "Data Approver",
+    badge: "APPROVAL",
+    backendName: "Data Approver",
     description:
-      "Monitor overall institutional performance, accreditation readiness, key metrics and strategic progress.",
+      "Validate institutional data and approve evidence and submissions before final processing.",
     summary:
-      "You'll enter the Executive Leadership workspace with institutional KPI scorecards and NAAC readiness metrics.",
-    color: "amber",
+      "You'll enter the Data Approver workspace to validate institutional information and approve authorized submissions.",
+    color: "cyan",
+    icon: FileCheck2,
+  },
+
+  {
+    id: 7,
+    key: "principal-director",
+    title: "Principal / Director",
+    badge: "LEADERSHIP",
+    backendName: "Principal / Director",
+    description:
+      "Provide institutional oversight, review accreditation progress, monitor performance, and handle final approvals.",
+    summary:
+      "You'll enter the Executive Leadership workspace with institutional performance, accreditation status, reports, and approval access.",
+    color: "rose",
     icon: Landmark,
   },
 ];
+
+
+/* =====================================================
+   SELECT ROLE PAGE
+===================================================== */
 
 function SelectRole() {
   const navigate = useNavigate();
@@ -85,51 +134,170 @@ function SelectRole() {
   const [selectedRole, setSelectedRole] = useState(null);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [loadingUser, setLoadingUser] = useState(true);
+  const [error, setError] = useState("");
+
+  /* =====================================================
+     FETCH AUTHENTICATED USER
+  ===================================================== */
 
   useEffect(() => {
     const fetchUser = async () => {
       try {
+        setLoadingUser(true);
+        setError("");
+
         const response = await api.get("/auth/me");
 
         setUser(response.data);
 
         /*
-         * Automatically select the role assigned
-         * to the logged-in user.
+         * Backend is the source of truth.
+         *
+         * /auth/me returns:
+         *
+         * response.data.role.name
+         *
+         * Example:
+         * "Admin"
+         * "Coordinator"
+         * "Reviewer"
          */
+
+        const backendRoleName =
+          response.data?.role?.name;
+
         const assignedRole = roles.find(
-          (role) => role.id === response.data.role_id
+          (role) =>
+            role.backendName === backendRoleName
         );
 
         if (assignedRole) {
           setSelectedRole(assignedRole);
+        } else {
+          setError(
+            `Your assigned role "${backendRoleName || "Unknown"}" is not configured in the frontend.`
+          );
         }
+
       } catch (error) {
-        console.error("Unable to fetch current user:", error);
+        console.error(
+          "Unable to fetch current user:",
+          error
+        );
+
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("user");
+        localStorage.removeItem("selectedRole");
 
         navigate("/");
+      } finally {
+        setLoadingUser(false);
       }
     };
 
     fetchUser();
   }, [navigate]);
 
+
+  /* =====================================================
+     SELECT ROLE
+  ===================================================== */
+
   const selectRole = (role) => {
+    /*
+     * The role is already assigned by the backend.
+     *
+     * We allow the card to be displayed,
+     * but only the authenticated backend role
+     * can actually be selected.
+     */
+
+    const backendRoleName =
+      user?.role?.name;
+
+    if (role.backendName !== backendRoleName) {
+      return;
+    }
+
     setSelectedRole(role);
+    setError("");
   };
+
+
+  /* =====================================================
+     RESET ROLE
+  ===================================================== */
 
   const resetRoleSelection = () => {
-    setSelectedRole(null);
+    /*
+     * Since the backend controls the user's role,
+     * do not allow switching to another role.
+     *
+     * We simply restore the authenticated role.
+     */
+
+    const backendRoleName =
+      user?.role?.name;
+
+    const assignedRole = roles.find(
+      (role) =>
+        role.backendName === backendRoleName
+    );
+
+    if (assignedRole) {
+      setSelectedRole(assignedRole);
+    }
   };
 
+
+  /* =====================================================
+     GO TO DASHBOARD
+  ===================================================== */
+
   const navigateToDashboard = () => {
-    if (!selectedRole) return;
+    if (!selectedRole || loading) {
+      return;
+    }
+
+    /*
+     * Final frontend verification.
+     */
+
+    const backendRoleName =
+      user?.role?.name;
+
+    if (
+      selectedRole.backendName !==
+      backendRoleName
+    ) {
+      setError(
+        "Unauthorized role selection."
+      );
+
+      return;
+    }
 
     setLoading(true);
+
+    /*
+     * Save verified role information.
+     */
 
     localStorage.setItem(
       "selectedRole",
       JSON.stringify(selectedRole)
+    );
+
+    /*
+     * Save permissions received from backend.
+     */
+
+    localStorage.setItem(
+      "permissions",
+      JSON.stringify(
+        user?.permissions || []
+      )
     );
 
     setTimeout(() => {
@@ -137,42 +305,107 @@ function SelectRole() {
     }, 700);
   };
 
+
+  /* =====================================================
+     LOGOUT
+  ===================================================== */
+
   const handleLogout = () => {
     localStorage.removeItem("accessToken");
     localStorage.removeItem("user");
     localStorage.removeItem("selectedRole");
+    localStorage.removeItem("permissions");
 
     navigate("/");
   };
 
-  const initials = user?.name
-    ? user.name
+
+  /* =====================================================
+     USER INITIALS
+  ===================================================== */
+
+  const initials = user?.user?.name
+    ? user.user.name
         .split(" ")
         .map((word) => word[0])
         .join("")
         .substring(0, 2)
         .toUpperCase()
-    : "AK";
+    : "EU";
+
+
+  /* =====================================================
+     LOADING SCREEN
+  ===================================================== */
+
+  if (loadingUser) {
+    return (
+      <div className="select-role-page">
+
+        <div
+          style={{
+            minHeight: "100vh",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: "Arial, sans-serif",
+          }}
+        >
+
+          <div
+            style={{
+              textAlign: "center",
+            }}
+          >
+
+            <div className="loading-spinner"></div>
+
+            <p
+              style={{
+                marginTop: "16px",
+                color: "#64748b",
+              }}
+            >
+              Verifying your role...
+            </p>
+
+          </div>
+
+        </div>
+
+      </div>
+    );
+  }
+
 
   return (
     <div className="select-role-page">
 
-      {/* ================= HEADER ================= */}
+
+      {/* =====================================================
+          HEADER
+      ===================================================== */}
 
       <header className="role-header">
 
         <div className="header-inner">
 
-          {/* Brand */}
+
+          {/* BRAND */}
+
           <div className="brand-section">
 
             <div className="brand-logo">
-              <ShieldCheck size={23} strokeWidth={2.2} />
+              <ShieldCheck
+                size={23}
+                strokeWidth={2.2}
+              />
             </div>
 
             <div className="brand-text">
 
               <div className="brand-title-row">
+
                 <span className="brand-name">
                   EduVerse
                 </span>
@@ -180,6 +413,7 @@ function SelectRole() {
                 <span className="naac-badge">
                   NAAC PORTAL
                 </span>
+
               </div>
 
               <p className="brand-subtitle">
@@ -187,16 +421,25 @@ function SelectRole() {
               </p>
 
             </div>
+
           </div>
 
-          {/* Right Header */}
+
+          {/* HEADER RIGHT */}
+
           <div className="header-right">
+
+
+            {/* INSTITUTION */}
 
             <div className="institution-info">
 
               <div className="institution-name">
+
                 <span className="online-dot"></span>
+
                 St. Xavier's Autonomous Institute
+
               </div>
 
               <div className="institution-domain">
@@ -205,9 +448,12 @@ function SelectRole() {
 
             </div>
 
+
             <div className="header-divider"></div>
 
-            {/* User */}
+
+            {/* USER */}
+
             <div className="user-section">
 
               <div className="user-capsule">
@@ -219,11 +465,14 @@ function SelectRole() {
                 <div className="user-details">
 
                   <div className="user-name">
-                    {user?.name || "Dr. Ananya K."}
+
+                    {user?.user?.name ||
+                      "Authenticated User"}
 
                     <span className="sso-badge">
                       SSO
                     </span>
+
                   </div>
 
                   <div className="active-session">
@@ -234,12 +483,15 @@ function SelectRole() {
 
               </div>
 
+
               <button
                 className="logout-button"
                 onClick={handleLogout}
                 title="Sign Out of Session"
               >
+
                 <LogOut size={17} />
+
               </button>
 
             </div>
@@ -250,71 +502,151 @@ function SelectRole() {
 
       </header>
 
-      {/* ================= MAIN ================= */}
+
+      {/* =====================================================
+          MAIN
+      ===================================================== */}
 
       <main className="role-main">
 
-        {/* Hero */}
+
+        {/* HERO */}
 
         <section className="role-hero">
 
           <div className="gateway-badge">
+
             <ShieldCheck size={13} />
+
             Authenticated Role Gateway • Step 2 of 2
+
           </div>
+
 
           <h1>
             Choose Your Role
           </h1>
 
+
           <p className="hero-description">
             Select your role to continue to your personalized NAAC workspace.
           </p>
 
+
           <p className="hero-subdescription">
+
             Your access, permissions, criteria modules, and analytical
-            dashboards are customized according to the selected role.
+            dashboards are customized according to your assigned role.
+
           </p>
 
         </section>
 
-        {/* ================= ROLE CARDS ================= */}
+
+        {/* ERROR */}
+
+        {error && (
+
+          <div
+            style={{
+              maxWidth: "1100px",
+              margin: "0 auto 20px",
+              padding: "14px 18px",
+              borderRadius: "10px",
+              background: "#fff1f2",
+              color: "#be123c",
+              border: "1px solid #fecdd3",
+            }}
+          >
+
+            {error}
+
+          </div>
+
+        )}
+
+
+        {/* =====================================================
+            ROLE CARDS
+        ===================================================== */}
 
         <section className="roles-container">
 
-          {/* First Row */}
+
+          {/* ROW 1 — 3 ROLES */}
 
           <div className="roles-row-three">
 
             {roles.slice(0, 3).map((role) => (
+
               <RoleCard
                 key={role.id}
                 role={role}
-                selected={selectedRole?.id === role.id}
+                selected={
+                  selectedRole?.id === role.id
+                }
+                authenticatedRole={
+                  user?.role?.name
+                }
                 onSelect={selectRole}
               />
+
             ))}
 
           </div>
 
-          {/* Second Row */}
+
+          {/* ROW 2 — 2 ROLES */}
 
           <div className="roles-row-two">
 
-            {roles.slice(3).map((role) => (
+            {roles.slice(3, 5).map((role) => (
+
               <RoleCard
                 key={role.id}
                 role={role}
-                selected={selectedRole?.id === role.id}
+                selected={
+                  selectedRole?.id === role.id
+                }
+                authenticatedRole={
+                  user?.role?.name
+                }
                 onSelect={selectRole}
               />
+
+            ))}
+
+          </div>
+
+
+          {/* ROW 3 — 2 ROLES */}
+
+          <div className="roles-row-two">
+
+            {roles.slice(5, 7).map((role) => (
+
+              <RoleCard
+                key={role.id}
+                role={role}
+                selected={
+                  selectedRole?.id === role.id
+                }
+                authenticatedRole={
+                  user?.role?.name
+                }
+                onSelect={selectRole}
+              />
+
             ))}
 
           </div>
 
         </section>
 
-        {/* ================= SELECTION SUMMARY ================= */}
+
+        {/* =====================================================
+            SELECTION SUMMARY
+        ===================================================== */}
 
         <section className="selection-summary">
 
@@ -322,11 +654,18 @@ function SelectRole() {
 
             <div className="summary-active">
 
+
               <div className="summary-left">
 
                 <div className="summary-icon">
-                  <Check size={21} strokeWidth={2.5} />
+
+                  <Check
+                    size={21}
+                    strokeWidth={2.5}
+                  />
+
                 </div>
+
 
                 <div className="summary-content">
 
@@ -349,6 +688,7 @@ function SelectRole() {
 
                   </div>
 
+
                   <p>
                     {selectedRole.summary}
                   </p>
@@ -357,6 +697,7 @@ function SelectRole() {
 
               </div>
 
+
               <button
                 className="continue-button"
                 onClick={navigateToDashboard}
@@ -364,15 +705,25 @@ function SelectRole() {
               >
 
                 {loading ? (
+
                   <>
+
                     <span className="loading-spinner"></span>
+
                     Redirecting...
+
                   </>
+
                 ) : (
+
                   <>
+
                     Continue to Dashboard
+
                     <ArrowRight size={17} />
+
                   </>
+
                 )}
 
               </button>
@@ -386,7 +737,7 @@ function SelectRole() {
               <Info size={16} />
 
               <span>
-                Click any of the 5 roles above to unlock your personalized
+                Your authenticated role will unlock your personalized
                 accreditation dashboard.
               </span>
 
@@ -396,13 +747,19 @@ function SelectRole() {
 
         </section>
 
-        {/* ================= RBAC ================= */}
+
+        {/* =====================================================
+            RBAC BANNER
+        ===================================================== */}
 
         <section className="rbac-banner">
 
           <div className="rbac-icon">
+
             <Lock size={15} />
+
           </div>
+
 
           <div>
 
@@ -411,10 +768,12 @@ function SelectRole() {
             </h4>
 
             <p>
+
               Your workspace is customized according to your assigned
-              permissions. You can only view data, upload documents, and
-              approve criteria authorized for your role under Institutional
-              NAAC Guidelines.
+              permissions. You can only view data, upload documents,
+              and approve criteria authorized for your role under
+              Institutional NAAC Guidelines.
+
             </p>
 
           </div>
@@ -423,13 +782,17 @@ function SelectRole() {
 
       </main>
 
-      {/* ================= FOOTER ================= */}
+
+      {/* =====================================================
+          FOOTER
+      ===================================================== */}
 
       <footer className="role-footer">
 
         <div>
           © 2026 EduVerse NAAC Management System • Institutional Quality Suite
         </div>
+
 
         <div className="footer-right">
 
@@ -463,28 +826,49 @@ function SelectRole() {
 function RoleCard({
   role,
   selected,
+  authenticatedRole,
   onSelect,
 }) {
 
   const Icon = role.icon;
 
+  const isAuthenticatedRole =
+    role.backendName === authenticatedRole;
+
+
   return (
     <div
       className={`role-card role-${role.color} ${
         selected ? "role-card-selected" : ""
+      } ${
+        !isAuthenticatedRole
+          ? "role-card-disabled"
+          : ""
       }`}
       onClick={() => onSelect(role)}
+      title={
+        !isAuthenticatedRole
+          ? "This role is not assigned to your account"
+          : "Select your assigned role"
+      }
     >
 
-      {/* Top */}
+
+      {/* TOP */}
 
       <div>
 
         <div className="role-card-top">
 
           <div className="role-icon">
-            <Icon size={23} strokeWidth={2} />
+
+            <Icon
+              size={23}
+              strokeWidth={2}
+            />
+
           </div>
+
 
           <div className="radio-button">
 
@@ -496,7 +880,8 @@ function RoleCard({
 
         </div>
 
-        {/* Title */}
+
+        {/* TITLE */}
 
         <div className="role-title-row">
 
@@ -510,7 +895,8 @@ function RoleCard({
 
         </div>
 
-        {/* Description */}
+
+        {/* DESCRIPTION */}
 
         <p className="role-description">
           {role.description}
@@ -518,13 +904,21 @@ function RoleCard({
 
       </div>
 
-      {/* Bottom */}
+
+      {/* FOOTER */}
 
       <div className="role-card-footer">
 
         <span>
-          {selected ? "Selected ✓" : "Select role"}
+
+          {selected
+            ? "Selected ✓"
+            : isAuthenticatedRole
+              ? "Select role"
+              : "Not assigned"}
+
         </span>
+
 
         <ArrowRight
           size={16}
@@ -536,5 +930,6 @@ function RoleCard({
     </div>
   );
 }
+
 
 export default SelectRole;
