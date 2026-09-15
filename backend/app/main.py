@@ -17,6 +17,9 @@ from app.committee.routes import router as committee_router
 from app.reviewer.routes import router as reviewer_router
 from app.principal.routes import router as principal_router
 from app.report.routes import router as report_router
+from app.institution_request.routes import (
+    router as institution_request_router
+)
 
 
 app = FastAPI(
@@ -62,6 +65,9 @@ app.include_router(committee_router)
 app.include_router(reviewer_router)
 app.include_router(principal_router)
 app.include_router(report_router)
+app.include_router(
+    institution_request_router
+)
 
 
 # ============================================================

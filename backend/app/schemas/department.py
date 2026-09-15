@@ -1,3 +1,4 @@
+
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -8,6 +9,7 @@ class DepartmentBase(BaseModel):
     code: str
     head_name: Optional[str] = None
     institution_id: int
+    faculty_id: Optional[int] = None
 
 
 class DepartmentCreate(DepartmentBase):
@@ -18,6 +20,7 @@ class DepartmentUpdate(BaseModel):
     name: Optional[str] = None
     code: Optional[str] = None
     head_name: Optional[str] = None
+    faculty_id: Optional[int] = None
 
 
 class DepartmentResponse(DepartmentBase):

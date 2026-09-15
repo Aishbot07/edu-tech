@@ -1,16 +1,21 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_db, require_permission
+from app.auth.dependencies import get_db, get_current_user, require_permission
 from app.auth.security import hash_password
+
+from app.auth.registration_authority import (
+    get_role_name,
+    get_authorized_registration_requests,
+    validate_registration_approval,
+)
 
 from app.models import (
     User,
     Role,
     Module,
     Permission,
+    RoleModulePermission,
     Institution,
     Faculty,
     Department,
@@ -21,9 +26,6 @@ from app.models import (
 from app.schemas.admin import (
     AdminUserCreate,
     AdminUserUpdate,
-)
-
-from app.schemas.registration_admin import (
     RegistrationApprovalRequest,
     RegistrationRejectionRequest,
 )
@@ -40,6 +42,213 @@ router = APIRouter(
 
 
 # ============================================================
+# ROLE NAMES
+# ============================================================
+
+ADMIN_ROLE = "Admin"
+NAAC_COORDINATOR_ROLE = "NAAC Coordinator"
+COMMITTEE_MEMBER_ROLE = "Committee Member"
+DEPT_COORDINATOR_ROLE = "Dept. Coordinator"
+REVIEWER_ROLE = "Reviewer"
+DATA_APPROVER_ROLE = "Data Approver"
+PRINCIPAL_DIRECTOR_ROLE = "Principal / Director"
+
+
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
+
+def get_role(
+    db: Session,
+    role_id: int | None
+):
+    if not role_id:
+        return None
+
+    return (
+        db.query(Role)
+        .filter(Role.id == role_id)
+        .first()
+    )
+
+
+def get_institution(
+    db: Session,
+    institution_id: int | None
+):
+    if not institution_id:
+        return None
+
+    return (
+        db.query(Institution)
+        .filter(Institution.id == institution_id)
+        .first()
+    )
+
+
+def get_department(
+    db: Session,
+    department_id: int | None
+):
+    if not department_id:
+        return None
+
+    return (
+        db.query(Department)
+        .filter(Department.id == department_id)
+        .first()
+    )
+
+
+def get_faculty(
+    db: Session,
+    faculty_id: int | None
+):
+    if not faculty_id:
+        return None
+
+    return (
+        db.query(Faculty)
+        .filter(Faculty.id == faculty_id)
+        .first()
+    )
+
+
+def get_faculty_from_department(
+    db: Session,
+    department_id: int | None
+):
+    department = get_department(
+        db,
+        department_id
+    )
+
+    if not department or not department.faculty_id:
+        return None
+
+    return get_faculty(
+        db,
+        department.faculty_id
+    )
+
+
+def validate_user_hierarchy(
+    db: Session,
+    institution_id: int | None,
+    faculty_id: int | None,
+    department_id: int | None,
+):
+    """
+    Validates:
+
+    Institution
+        ↓
+    Faculty
+        ↓
+    Department
+    """
+
+    institution = None
+    faculty = None
+    department = None
+
+    # --------------------------------------------------------
+    # Institution
+    # --------------------------------------------------------
+
+    if institution_id is not None:
+
+        institution = get_institution(
+            db,
+            institution_id
+        )
+
+        if not institution:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Institution not found"
+            )
+
+    # --------------------------------------------------------
+    # Faculty
+    # --------------------------------------------------------
+
+    if faculty_id is not None:
+
+        faculty = get_faculty(
+            db,
+            faculty_id
+        )
+
+        if not faculty:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Faculty not found"
+            )
+
+        if (
+            institution_id is not None
+            and faculty.institution_id != institution_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Selected faculty does not belong "
+                    "to the selected institution."
+                )
+            )
+
+    # --------------------------------------------------------
+    # Department
+    # --------------------------------------------------------
+
+    if department_id is not None:
+
+        department = get_department(
+            db,
+            department_id
+        )
+
+        if not department:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Department not found"
+            )
+
+        if (
+            institution_id is not None
+            and department.institution_id != institution_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Selected department does not belong "
+                    "to the selected institution."
+                )
+            )
+
+        # ----------------------------------------------------
+        # Department → Faculty
+        # ----------------------------------------------------
+
+        if department.faculty_id:
+
+            if (
+                faculty_id is not None
+                and department.faculty_id != faculty_id
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "Selected department does not belong "
+                        "to the selected faculty."
+                    )
+                )
+
+    return institution, faculty, department
+
+
+# ============================================================
 # ADMIN DASHBOARD
 # ============================================================
 
@@ -50,19 +259,55 @@ def admin_dashboard(
     ),
     db: Session = Depends(get_db)
 ):
-    total_users = db.query(User).count()
 
-    active_users = db.query(User).filter(
-        User.is_active == True
-    ).count()
+    total_users = (
+        db.query(User)
+        .count()
+    )
 
-    total_roles = db.query(Role).count()
-    total_modules = db.query(Module).count()
-    total_permissions = db.query(Permission).count()
-    total_institutions = db.query(Institution).count()
-    total_cycles = db.query(AccreditationCycle).count()
+    active_users = (
+        db.query(User)
+        .filter(
+            User.is_active == True
+        )
+        .count()
+    )
+
+    total_roles = (
+        db.query(Role)
+        .count()
+    )
+
+    total_modules = (
+        db.query(Module)
+        .count()
+    )
+
+    total_permissions = (
+        db.query(Permission)
+        .count()
+    )
+
+    total_institutions = (
+        db.query(Institution)
+        .count()
+    )
+
+    total_cycles = (
+        db.query(AccreditationCycle)
+        .count()
+    )
+
+    pending_requests = (
+        db.query(RegistrationRequest)
+        .filter(
+            RegistrationRequest.status == "PENDING"
+        )
+        .count()
+    )
 
     return {
+
         "message": "Admin dashboard data",
 
         "user": {
@@ -72,13 +317,26 @@ def admin_dashboard(
         },
 
         "statistics": {
+
             "total_users": total_users,
+
             "active_users": active_users,
+
             "total_roles": total_roles,
+
             "total_modules": total_modules,
-            "total_permissions": total_permissions,
-            "total_institutions": total_institutions,
-            "total_accreditation_cycles": total_cycles,
+
+            "total_permissions":
+                total_permissions,
+
+            "total_institutions":
+                total_institutions,
+
+            "total_accreditation_cycles":
+                total_cycles,
+
+            "pending_registration_requests":
+                pending_requests,
         }
     }
 
@@ -94,28 +352,100 @@ def get_users(
     ),
     db: Session = Depends(get_db)
 ):
-    users = db.query(User).all()
+
+    users = (
+        db.query(User)
+        .order_by(User.id)
+        .all()
+    )
 
     result = []
 
     for user in users:
 
-        role = db.query(Role).filter(
-            Role.id == user.role_id
-        ).first()
+        role = get_role(
+            db,
+            user.role_id
+        )
+
+        institution = get_institution(
+            db,
+            user.institution_id
+        )
+
+        department = get_department(
+            db,
+            user.department_id
+        )
+
+        faculty = get_faculty(
+            db,
+            user.faculty_id
+        )
 
         result.append({
+
             "id": user.id,
+
             "name": user.name,
+
             "email": user.email,
+
             "role_id": user.role_id,
-            "role": role.name if role else None,
 
-            "institution_id": user.institution_id,
-            "faculty_id": user.faculty_id,
-            "department_id": user.department_id,
+            "role": (
+                role.name
+                if role
+                else None
+            ),
 
-            "is_active": user.is_active,
+            "role_name": (
+                role.name
+                if role
+                else None
+            ),
+
+            "institution_id":
+                user.institution_id,
+
+            "institution":
+                institution.name
+                if institution
+                else None,
+
+            "institution_name":
+                institution.name
+                if institution
+                else None,
+
+            "faculty_id":
+                user.faculty_id,
+
+            "faculty":
+                faculty.name
+                if faculty
+                else None,
+
+            "faculty_name":
+                faculty.name
+                if faculty
+                else None,
+
+            "department_id":
+                user.department_id,
+
+            "department":
+                department.name
+                if department
+                else None,
+
+            "department_name":
+                department.name
+                if department
+                else None,
+
+            "is_active":
+                user.is_active,
         })
 
     return result
@@ -136,156 +466,129 @@ def create_user(
     ),
     db: Session = Depends(get_db)
 ):
+
     # --------------------------------------------------------
-    # Check duplicate email
+    # Duplicate email
     # --------------------------------------------------------
 
-    email = user_data.email.strip().lower()
-
-    existing_user = db.query(User).filter(
-        User.email == email
-    ).first()
+    existing_user = (
+        db.query(User)
+        .filter(
+            User.email == user_data.email
+        )
+        .first()
+    )
 
     if existing_user:
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A user with this email already exists"
+            detail=(
+                "A user with this email already exists"
+            )
         )
 
     # --------------------------------------------------------
-    # Check role
+    # Role
     # --------------------------------------------------------
 
-    role = db.query(Role).filter(
-        Role.id == user_data.role_id
-    ).first()
+    role = get_role(
+        db,
+        user_data.role_id
+    )
 
     if not role:
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Role not found"
         )
 
-    # ========================================================
-    # INSTITUTION VALIDATION
-    # ========================================================
+    # --------------------------------------------------------
+    # Validate hierarchy
+    # --------------------------------------------------------
 
-    if user_data.institution_id is not None:
-
-        institution = db.query(Institution).filter(
-            Institution.id == user_data.institution_id
-        ).first()
-
-        if not institution:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Institution not found"
-            )
-
-    # ========================================================
-    # FACULTY VALIDATION
-    # ========================================================
-
-    if user_data.faculty_id is not None:
-
-        faculty = db.query(Faculty).filter(
-            Faculty.id == user_data.faculty_id
-        ).first()
-
-        if not faculty:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Faculty not found"
-            )
-
-        if (
-            user_data.institution_id is not None
-            and faculty.institution_id != user_data.institution_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Selected faculty does not belong "
-                    "to the selected institution"
-                )
-            )
-
-    # ========================================================
-    # DEPARTMENT VALIDATION
-    # ========================================================
-
-    if user_data.department_id is not None:
-
-        department = db.query(Department).filter(
-            Department.id == user_data.department_id
-        ).first()
-
-        if not department:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Department not found"
-            )
-
-        if (
-            user_data.institution_id is not None
-            and department.institution_id != user_data.institution_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Selected department does not belong "
-                    "to the selected institution"
-                )
-            )
-
-        if (
-            user_data.faculty_id is not None
-            and department.faculty_id != user_data.faculty_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Selected department does not belong "
-                    "to the selected faculty"
-                )
-            )
-
-    # ========================================================
-    # CREATE USER
-    # ========================================================
-
-    new_user = User(
-        name=user_data.name.strip(),
-        email=email,
-        password_hash=hash_password(user_data.password),
-        role_id=user_data.role_id,
-
+    validate_user_hierarchy(
+        db=db,
         institution_id=user_data.institution_id,
         faculty_id=user_data.faculty_id,
         department_id=user_data.department_id,
+    )
 
-        is_active=user_data.is_active,
+    # --------------------------------------------------------
+    # Create user
+    # --------------------------------------------------------
+
+    new_user = User(
+
+        name=user_data.name,
+
+        email=user_data.email,
+
+        password_hash=
+            hash_password(
+                user_data.password
+            ),
+
+        role_id=user_data.role_id,
+
+        institution_id=
+            user_data.institution_id,
+
+        faculty_id=
+            user_data.faculty_id,
+
+        department_id=
+            user_data.department_id,
+
+        is_active=True,
     )
 
     db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+
+    try:
+
+        db.commit()
+
+        db.refresh(new_user)
+
+    except Exception:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create user"
+        )
 
     return {
-        "message": "User created successfully",
+
+        "message":
+            "User created successfully",
 
         "user": {
+
             "id": new_user.id,
+
             "name": new_user.name,
+
             "email": new_user.email,
+
             "role_id": new_user.role_id,
+
             "role": role.name,
 
-            "institution_id": new_user.institution_id,
-            "faculty_id": new_user.faculty_id,
-            "department_id": new_user.department_id,
+            "institution_id":
+                new_user.institution_id,
 
-            "is_active": new_user.is_active,
+            "faculty_id":
+                new_user.faculty_id,
+
+            "department_id":
+                new_user.department_id,
+
+            "is_active":
+                new_user.is_active,
         }
     }
 
@@ -302,32 +605,84 @@ def get_user(
     ),
     db: Session = Depends(get_db)
 ):
-    user = db.query(User).filter(
-        User.id == user_id
-    ).first()
+
+    user = (
+        db.query(User)
+        .filter(
+            User.id == user_id
+        )
+        .first()
+    )
 
     if not user:
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
 
-    role = db.query(Role).filter(
-        Role.id == user.role_id
-    ).first()
+    role = get_role(
+        db,
+        user.role_id
+    )
+
+    institution = get_institution(
+        db,
+        user.institution_id
+    )
+
+    faculty = get_faculty(
+        db,
+        user.faculty_id
+    )
+
+    department = get_department(
+        db,
+        user.department_id
+    )
 
     return {
+
         "id": user.id,
+
         "name": user.name,
+
         "email": user.email,
+
         "role_id": user.role_id,
-        "role": role.name if role else None,
 
-        "institution_id": user.institution_id,
-        "faculty_id": user.faculty_id,
-        "department_id": user.department_id,
+        "role": (
+            role.name
+            if role
+            else None
+        ),
 
-        "is_active": user.is_active,
+        "institution_id":
+            user.institution_id,
+
+        "institution":
+            institution.name
+            if institution
+            else None,
+
+        "faculty_id":
+            user.faculty_id,
+
+        "faculty":
+            faculty.name
+            if faculty
+            else None,
+
+        "department_id":
+            user.department_id,
+
+        "department":
+            department.name
+            if department
+            else None,
+
+        "is_active":
+            user.is_active,
     }
 
 
@@ -344,11 +699,17 @@ def update_user(
     ),
     db: Session = Depends(get_db)
 ):
-    user = db.query(User).filter(
-        User.id == user_id
-    ).first()
+
+    user = (
+        db.query(User)
+        .filter(
+            User.id == user_id
+        )
+        .first()
+    )
 
     if not user:
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
@@ -360,33 +721,40 @@ def update_user(
 
     if user_data.email is not None:
 
-        email = user_data.email.strip().lower()
-
-        existing_user = db.query(User).filter(
-            User.email == email,
-            User.id != user_id
-        ).first()
+        existing_user = (
+            db.query(User)
+            .filter(
+                User.email == user_data.email,
+                User.id != user_id,
+            )
+            .first()
+        )
 
         if existing_user:
+
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A user with this email already exists"
+                detail=(
+                    "A user with this email already exists"
+                )
             )
 
-        user.email = email
+        user.email = user_data.email
 
     # --------------------------------------------------------
     # Name
     # --------------------------------------------------------
 
     if user_data.name is not None:
-        user.name = user_data.name.strip()
+
+        user.name = user_data.name
 
     # --------------------------------------------------------
     # Password
     # --------------------------------------------------------
 
     if user_data.password is not None:
+
         user.password_hash = hash_password(
             user_data.password
         )
@@ -397,11 +765,13 @@ def update_user(
 
     if user_data.role_id is not None:
 
-        role = db.query(Role).filter(
-            Role.id == user_data.role_id
-        ).first()
+        role = get_role(
+            db,
+            user_data.role_id
+        )
 
         if not role:
+
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Role not found"
@@ -409,154 +779,144 @@ def update_user(
 
         user.role_id = user_data.role_id
 
-    # ========================================================
-    # INSTITUTION / FACULTY / DEPARTMENT
-    # ========================================================
-
-    institution_id = (
-        user_data.institution_id
-        if user_data.institution_id is not None
-        else user.institution_id
-    )
-
-    faculty_id = (
-        user_data.faculty_id
-        if user_data.faculty_id is not None
-        else user.faculty_id
-    )
-
-    department_id = (
-        user_data.department_id
-        if user_data.department_id is not None
-        else user.department_id
-    )
-
     # --------------------------------------------------------
     # Institution
     # --------------------------------------------------------
 
     if user_data.institution_id is not None:
 
-        institution = db.query(Institution).filter(
-            Institution.id == institution_id
-        ).first()
+        institution = get_institution(
+            db,
+            user_data.institution_id
+        )
 
         if not institution:
+
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Institution not found"
             )
 
+        user.institution_id = (
+            user_data.institution_id
+        )
+
     # --------------------------------------------------------
     # Faculty
     # --------------------------------------------------------
 
-    if faculty_id is not None:
+    if user_data.faculty_id is not None:
 
-        faculty = db.query(Faculty).filter(
-            Faculty.id == faculty_id
-        ).first()
+        faculty = get_faculty(
+            db,
+            user_data.faculty_id
+        )
 
         if not faculty:
+
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Faculty not found"
             )
 
-        if (
-            institution_id is not None
-            and faculty.institution_id != institution_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Selected faculty does not belong "
-                    "to the selected institution"
-                )
-            )
+        user.faculty_id = (
+            user_data.faculty_id
+        )
 
     # --------------------------------------------------------
     # Department
     # --------------------------------------------------------
 
-    if department_id is not None:
+    if user_data.department_id is not None:
 
-        department = db.query(Department).filter(
-            Department.id == department_id
-        ).first()
+        department = get_department(
+            db,
+            user_data.department_id
+        )
 
         if not department:
+
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Department not found"
             )
 
-        if (
-            institution_id is not None
-            and department.institution_id != institution_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Selected department does not belong "
-                    "to the selected institution"
-                )
-            )
-
-        if (
-            faculty_id is not None
-            and department.faculty_id != faculty_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Selected department does not belong "
-                    "to the selected faculty"
-                )
-            )
+        user.department_id = (
+            user_data.department_id
+        )
 
     # --------------------------------------------------------
-    # Save hierarchy
+    # Validate final hierarchy
     # --------------------------------------------------------
 
-    if user_data.institution_id is not None:
-        user.institution_id = institution_id
-
-    if user_data.faculty_id is not None:
-        user.faculty_id = faculty_id
-
-    if user_data.department_id is not None:
-        user.department_id = department_id
+    validate_user_hierarchy(
+        db=db,
+        institution_id=user.institution_id,
+        faculty_id=user.faculty_id,
+        department_id=user.department_id,
+    )
 
     # --------------------------------------------------------
     # Active status
     # --------------------------------------------------------
 
     if user_data.is_active is not None:
-        user.is_active = user_data.is_active
 
-    db.commit()
-    db.refresh(user)
+        user.is_active = (
+            user_data.is_active
+        )
 
-    role = db.query(Role).filter(
-        Role.id == user.role_id
-    ).first()
+    try:
+
+        db.commit()
+
+        db.refresh(user)
+
+    except Exception:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update user"
+        )
+
+    role = get_role(
+        db,
+        user.role_id
+    )
 
     return {
-        "message": "User updated successfully",
+
+        "message":
+            "User updated successfully",
 
         "user": {
+
             "id": user.id,
+
             "name": user.name,
+
             "email": user.email,
+
             "role_id": user.role_id,
-            "role": role.name if role else None,
 
-            "institution_id": user.institution_id,
-            "faculty_id": user.faculty_id,
-            "department_id": user.department_id,
+            "role":
+                role.name
+                if role
+                else None,
 
-            "is_active": user.is_active,
+            "institution_id":
+                user.institution_id,
+
+            "faculty_id":
+                user.faculty_id,
+
+            "department_id":
+                user.department_id,
+
+            "is_active":
+                user.is_active,
         }
     }
 
@@ -573,28 +933,53 @@ def delete_user(
     ),
     db: Session = Depends(get_db)
 ):
-    user = db.query(User).filter(
-        User.id == user_id
-    ).first()
+
+    user = (
+        db.query(User)
+        .filter(
+            User.id == user_id
+        )
+        .first()
+    )
 
     if not user:
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
 
     if user.id == current_user.id:
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot delete your own account"
+            detail=(
+                "You cannot delete your own account"
+            )
         )
 
     db.delete(user)
-    db.commit()
+
+    try:
+
+        db.commit()
+
+    except Exception:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete user"
+        )
 
     return {
-        "message": "User deleted successfully",
-        "user_id": user_id
+
+        "message":
+            "User deleted successfully",
+
+        "user_id":
+            user_id,
     }
 
 
@@ -609,14 +994,24 @@ def get_roles(
     ),
     db: Session = Depends(get_db)
 ):
-    roles = db.query(Role).all()
+
+    roles = (
+        db.query(Role)
+        .order_by(Role.id)
+        .all()
+    )
 
     return [
+
         {
             "id": role.id,
+
             "name": role.name,
-            "description": role.description,
+
+            "description":
+                role.description,
         }
+
         for role in roles
     ]
 
@@ -632,14 +1027,24 @@ def get_permissions(
     ),
     db: Session = Depends(get_db)
 ):
-    permissions = db.query(Permission).all()
+
+    permissions = (
+        db.query(Permission)
+        .order_by(Permission.id)
+        .all()
+    )
 
     return [
+
         {
             "id": permission.id,
+
             "name": permission.name,
-            "description": permission.description,
+
+            "description":
+                permission.description,
         }
+
         for permission in permissions
     ]
 
@@ -655,15 +1060,26 @@ def get_modules(
     ),
     db: Session = Depends(get_db)
 ):
-    modules = db.query(Module).all()
+
+    modules = (
+        db.query(Module)
+        .order_by(Module.id)
+        .all()
+    )
 
     return [
+
         {
             "id": module.id,
+
             "name": module.name,
+
             "code": module.code,
-            "description": module.description,
+
+            "description":
+                module.description,
         }
+
         for module in modules
     ]
 
@@ -675,23 +1091,43 @@ def get_modules(
 @router.get("/institutions")
 def get_institutions(
     current_user: User = Depends(
-        require_permission("INSTITUTION_MANAGEMENT", "View")
+        require_permission(
+            "INSTITUTION_MANAGEMENT",
+            "View"
+        )
     ),
     db: Session = Depends(get_db)
 ):
-    institutions = db.query(Institution).all()
+
+    institutions = (
+        db.query(Institution)
+        .order_by(Institution.id)
+        .all()
+    )
 
     return [
+
         {
             "id": institution.id,
+
             "name": institution.name,
+
             "code": institution.code,
+
             "city": institution.city,
+
             "state": institution.state,
-            "institution_type": institution.institution_type,
-            "established_year": institution.established_year,
-            "website": institution.website,
+
+            "institution_type":
+                institution.institution_type,
+
+            "established_year":
+                institution.established_year,
+
+            "website":
+                institution.website,
         }
+
         for institution in institutions
     ]
 
@@ -703,143 +1139,239 @@ def get_institutions(
 @router.get("/accreditation-cycles")
 def get_accreditation_cycles(
     current_user: User = Depends(
-        require_permission("ACCREDITATION_CYCLES", "View")
+        require_permission(
+            "ACCREDITATION_CYCLES",
+            "View"
+        )
     ),
     db: Session = Depends(get_db)
 ):
-    cycles = db.query(AccreditationCycle).all()
+
+    cycles = (
+        db.query(AccreditationCycle)
+        .order_by(AccreditationCycle.id)
+        .all()
+    )
 
     return [
+
         {
             "id": cycle.id,
-            "institution_id": cycle.institution_id,
+
+            "institution_id":
+                cycle.institution_id,
+
             "name": cycle.name,
+
             "code": cycle.code,
-            "academic_period": cycle.academic_period,
-            "status": cycle.status,
-            "description": cycle.description,
+
+            "academic_period":
+                cycle.academic_period,
+
+            "status":
+                cycle.status,
+
+            "description":
+                cycle.description,
         }
+
         for cycle in cycles
     ]
 
 
 # ============================================================
 # REGISTRATION REQUESTS
+#
+# IMPORTANT:
+#
+# These endpoints DO NOT use:
+#
+# require_permission("USER_MANAGEMENT", "View")
+#
+# because registration authorization now follows the
+# organizational hierarchy.
+#
 # ============================================================
 
 @router.get("/registration-requests")
 def get_registration_requests(
     current_user: User = Depends(
-        require_permission("USER_MANAGEMENT", "View")
+        get_current_user
     ),
     db: Session = Depends(get_db)
 ):
-    requests = (
-        db.query(RegistrationRequest)
-        .order_by(RegistrationRequest.created_at.desc())
-        .all()
+
+    requests = get_authorized_registration_requests(
+        db=db,
+        current_user=current_user,
     )
 
     result = []
 
     for request in requests:
 
-        assigned_role = None
+        # ----------------------------------------------------
+        # Requested role
+        # ----------------------------------------------------
 
-        if request.assigned_role_id:
+        requested_role = get_role(
+            db,
+            request.requested_role_id
+        )
 
-            assigned_role = (
-                db.query(Role)
-                .filter(
-                    Role.id == request.assigned_role_id
-                )
-                .first()
-            )
+        # ----------------------------------------------------
+        # Assigned role
+        # ----------------------------------------------------
+
+        assigned_role = get_role(
+            db,
+            request.assigned_role_id
+        )
+
+        # ----------------------------------------------------
+        # Department
+        # ----------------------------------------------------
+
+        department = get_department(
+            db,
+            request.department_id
+        )
+
+        # ----------------------------------------------------
+        # Faculty is derived from department
+        #
+        # RegistrationRequest does NOT store faculty_id.
+        # ----------------------------------------------------
 
         faculty = None
 
-        if request.faculty_id:
+        if (
+            department
+            and department.faculty_id
+        ):
 
-            faculty = (
-                db.query(Faculty)
-                .filter(
-                    Faculty.id == request.faculty_id
-                )
-                .first()
+            faculty = get_faculty(
+                db,
+                department.faculty_id
             )
 
-        department = None
+        # ----------------------------------------------------
+        # Institution
+        # ----------------------------------------------------
 
-        if request.department_id:
+        institution = get_institution(
+            db,
+            request.institution_id
+        )
 
-            department = (
-                db.query(Department)
+        # ----------------------------------------------------
+        # Reviewer / authorizer
+        # ----------------------------------------------------
+
+        reviewed_by_user = None
+
+        if request.reviewed_by:
+
+            reviewed_by_user = (
+                db.query(User)
                 .filter(
-                    Department.id == request.department_id
-                )
-                .first()
-            )
-
-        institution = None
-
-        if request.institution_id:
-
-            institution = (
-                db.query(Institution)
-                .filter(
-                    Institution.id == request.institution_id
+                    User.id
+                    == request.reviewed_by
                 )
                 .first()
             )
 
         result.append({
+
             "id": request.id,
 
-            "full_name": request.full_name,
-            "email": request.email,
+            "full_name":
+                request.full_name,
 
-            "institution": request.institution,
-            "institution_id": request.institution_id,
-            "institution_name": (
-                institution.name
-                if institution
-                else request.institution
-            ),
+            "email":
+                request.email,
 
-            "faculty_id": request.faculty_id,
-            "faculty": (
-                faculty.name
-                if faculty
-                else None
-            ),
+            "institution":
+                (
+                    institution.name
+                    if institution
+                    else request.institution
+                ),
 
-            "department": request.department,
-            "department_id": request.department_id,
-            "department_name": (
-                department.name
-                if department
-                else request.department
-            ),
+            "institution_id":
+                request.institution_id,
 
-            "designation": request.designation,
+            "faculty":
+                (
+                    faculty.name
+                    if faculty
+                    else None
+                ),
 
-            "status": request.status,
+            "faculty_id":
+                (
+                    faculty.id
+                    if faculty
+                    else None
+                ),
 
-            "assigned_role_id": request.assigned_role_id,
+            "department":
+                (
+                    department.name
+                    if department
+                    else request.department
+                ),
 
-            "assigned_role": (
-                assigned_role.name
-                if assigned_role
-                else None
-            ),
+            "department_id":
+                request.department_id,
 
-            "reviewed_by": request.reviewed_by,
-            "reviewed_at": request.reviewed_at,
+            "designation":
+                request.designation,
 
-            "rejection_reason": request.rejection_reason,
+            "requested_role":
+                (
+                    requested_role.name
+                    if requested_role
+                    else None
+                ),
 
-            "created_at": request.created_at,
-            "updated_at": request.updated_at,
+            "requested_role_id":
+                request.requested_role_id,
+
+            "assigned_role":
+                (
+                    assigned_role.name
+                    if assigned_role
+                    else None
+                ),
+
+            "assigned_role_id":
+                request.assigned_role_id,
+
+            "status":
+                request.status,
+
+            "reviewed_by":
+                request.reviewed_by,
+
+            "reviewed_by_name":
+                (
+                    reviewed_by_user.name
+                    if reviewed_by_user
+                    else None
+                ),
+
+            "reviewed_at":
+                request.reviewed_at,
+
+            "rejection_reason":
+                request.rejection_reason,
+
+            "created_at":
+                request.created_at,
+
+            "updated_at":
+                request.updated_at,
         })
 
     return result
@@ -849,133 +1381,248 @@ def get_registration_requests(
 # GET SINGLE REGISTRATION REQUEST
 # ============================================================
 
-@router.get("/registration-requests/{request_id}")
+@router.get(
+    "/registration-requests/{request_id}"
+)
 def get_registration_request(
     request_id: int,
     current_user: User = Depends(
-        require_permission("USER_MANAGEMENT", "View")
+        get_current_user
     ),
     db: Session = Depends(get_db)
 ):
-    registration_request = (
+
+    request = (
         db.query(RegistrationRequest)
         .filter(
-            RegistrationRequest.id == request_id
+            RegistrationRequest.id
+            == request_id
         )
         .first()
     )
 
-    if not registration_request:
+    if not request:
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Registration request not found"
-        )
-
-    assigned_role = None
-
-    if registration_request.assigned_role_id:
-
-        assigned_role = (
-            db.query(Role)
-            .filter(
-                Role.id == registration_request.assigned_role_id
+            detail=(
+                "Registration request not found"
             )
-            .first()
         )
+
+    # --------------------------------------------------------
+    # Check whether this authority can process this request
+    # --------------------------------------------------------
+
+    if request.status == "PENDING":
+
+        validate_registration_approval(
+            db=db,
+            registration_request=request,
+            current_user=current_user,
+        )
+
+    else:
+
+        # ----------------------------------------------------
+        # For already processed requests:
+        # Admin can view all.
+        #
+        # Other authorities can only view requests
+        # belonging to their institution.
+        # ----------------------------------------------------
+
+        current_role_name = get_role_name(
+            db,
+            current_user.role_id
+        )
+
+        if current_role_name != ADMIN_ROLE:
+
+            if (
+                current_user.institution_id
+                and
+                request.institution_id
+                != current_user.institution_id
+            ):
+
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=(
+                        "You can only view registration "
+                        "requests from your institution."
+                    )
+                )
+
+    requested_role = get_role(
+        db,
+        request.requested_role_id
+    )
+
+    assigned_role = get_role(
+        db,
+        request.assigned_role_id
+    )
+
+    institution = get_institution(
+        db,
+        request.institution_id
+    )
+
+    department = get_department(
+        db,
+        request.department_id
+    )
 
     faculty = None
 
-    if registration_request.faculty_id:
+    if (
+        department
+        and department.faculty_id
+    ):
 
-        faculty = (
-            db.query(Faculty)
-            .filter(
-                Faculty.id == registration_request.faculty_id
-            )
-            .first()
+        faculty = get_faculty(
+            db,
+            department.faculty_id
         )
 
-    department = None
+    reviewed_by_user = None
 
-    if registration_request.department_id:
+    if request.reviewed_by:
 
-        department = (
-            db.query(Department)
+        reviewed_by_user = (
+            db.query(User)
             .filter(
-                Department.id == registration_request.department_id
-            )
-            .first()
-        )
-
-    institution = None
-
-    if registration_request.institution_id:
-
-        institution = (
-            db.query(Institution)
-            .filter(
-                Institution.id == registration_request.institution_id
+                User.id
+                == request.reviewed_by
             )
             .first()
         )
 
     return {
-        "id": registration_request.id,
 
-        "full_name": registration_request.full_name,
-        "email": registration_request.email,
+        "id":
+            request.id,
 
-        "institution": registration_request.institution,
-        "institution_id": registration_request.institution_id,
-        "institution_name": (
-            institution.name
-            if institution
-            else registration_request.institution
-        ),
+        "full_name":
+            request.full_name,
 
-        "faculty_id": registration_request.faculty_id,
-        "faculty": (
-            faculty.name
-            if faculty
-            else None
-        ),
+        "email":
+            request.email,
 
-        "department": registration_request.department,
-        "department_id": registration_request.department_id,
-        "department_name": (
-            department.name
-            if department
-            else registration_request.department
-        ),
+        "institution":
+            (
+                institution.name
+                if institution
+                else request.institution
+            ),
 
-        "designation": registration_request.designation,
+        "institution_id":
+            request.institution_id,
 
-        "status": registration_request.status,
+        "faculty":
+            (
+                faculty.name
+                if faculty
+                else None
+            ),
 
-        "assigned_role_id": (
-            registration_request.assigned_role_id
-        ),
+        "faculty_id":
+            (
+                faculty.id
+                if faculty
+                else None
+            ),
 
-        "assigned_role": (
-            assigned_role.name
-            if assigned_role
-            else None
-        ),
+        "department":
+            (
+                department.name
+                if department
+                else request.department
+            ),
 
-        "reviewed_by": registration_request.reviewed_by,
-        "reviewed_at": registration_request.reviewed_at,
+        "department_id":
+            request.department_id,
 
-        "rejection_reason": (
-            registration_request.rejection_reason
-        ),
+        "designation":
+            request.designation,
 
-        "created_at": registration_request.created_at,
-        "updated_at": registration_request.updated_at,
+        "requested_role":
+            (
+                requested_role.name
+                if requested_role
+                else None
+            ),
+
+        "requested_role_id":
+            request.requested_role_id,
+
+        "assigned_role":
+            (
+                assigned_role.name
+                if assigned_role
+                else None
+            ),
+
+        "assigned_role_id":
+            request.assigned_role_id,
+
+        "status":
+            request.status,
+
+        "reviewed_by":
+            request.reviewed_by,
+
+        "reviewed_by_name":
+            (
+                reviewed_by_user.name
+                if reviewed_by_user
+                else None
+            ),
+
+        "reviewed_at":
+            request.reviewed_at,
+
+        "rejection_reason":
+            request.rejection_reason,
+
+        "created_at":
+            request.created_at,
+
+        "updated_at":
+            request.updated_at,
     }
 
 
 # ============================================================
 # APPROVE REGISTRATION REQUEST
+#
+# THIS IS THE MAIN HIERARCHICAL AUTHORIZATION ENDPOINT
+#
+# Committee Member
+#       ↓
+# Dept. Coordinator
+#
+# Dept. Coordinator
+#       ↓
+# NAAC Coordinator
+#
+# NAAC Coordinator
+#       ↓
+# Principal / Director
+#
+# Principal / Director
+#       ↓
+# Admin
+#
+# Reviewer
+#       ↓
+# Admin
+#
+# Data Approver
+#       ↓
+# Admin
+#
 # ============================================================
 
 @router.post(
@@ -985,232 +1632,358 @@ def approve_registration_request(
     request_id: int,
     approval_data: RegistrationApprovalRequest,
     current_user: User = Depends(
-        require_permission("USER_MANAGEMENT", "Create")
+        get_current_user
     ),
     db: Session = Depends(get_db)
 ):
+
+    # --------------------------------------------------------
+    # Find request
+    # --------------------------------------------------------
+
     registration_request = (
         db.query(RegistrationRequest)
         .filter(
-            RegistrationRequest.id == request_id
+            RegistrationRequest.id
+            == request_id
         )
         .first()
     )
 
     if not registration_request:
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Registration request not found"
-        )
-
-    # --------------------------------------------------------
-    # Only pending requests can be approved
-    # --------------------------------------------------------
-
-    if registration_request.status != "PENDING":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"Registration request is already "
-                f"{registration_request.status}"
+                "Registration request not found"
             )
         )
 
     # --------------------------------------------------------
-    # Validate role
+    # Must be pending
     # --------------------------------------------------------
 
-    role = (
-        db.query(Role)
-        .filter(
-            Role.id == approval_data.role_id
+    if (
+        registration_request.status
+        != "PENDING"
+    ):
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Only pending registration "
+                "requests can be approved."
+            )
         )
-        .first()
+
+    # --------------------------------------------------------
+    # HIERARCHICAL AUTHORIZATION
+    #
+    # This replaces Admin-only approval.
+    # --------------------------------------------------------
+
+    validate_registration_approval(
+        db=db,
+        registration_request=
+            registration_request,
+        current_user=current_user,
     )
 
-    if not role:
+    # --------------------------------------------------------
+    # Requested role
+    # --------------------------------------------------------
+
+    requested_role = get_role(
+        db,
+        registration_request.requested_role_id
+    )
+
+    if not requested_role:
+
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Selected role not found"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Requested role was not found."
+            )
         )
 
     # --------------------------------------------------------
-    # Check duplicate user
+    # Final assigned role
+    # --------------------------------------------------------
+
+    assigned_role = get_role(
+        db,
+        approval_data.role_id
+    )
+
+    if not assigned_role:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Assigned role not found."
+        )
+
+    # --------------------------------------------------------
+    # SECURITY:
+    #
+    # Non-Admin authorities cannot change the requested role.
+    #
+    # Example:
+    #
+    # Applicant requests Committee Member
+    #
+    # Dept. Coordinator can approve as Committee Member,
+    # but cannot secretly turn them into Admin.
+    #
+    # Admin can make final role decisions.
+    # --------------------------------------------------------
+
+    current_role_name = get_role_name(
+        db,
+        current_user.role_id
+    )
+
+    if current_role_name != ADMIN_ROLE:
+
+        if (
+            approval_data.role_id
+            != registration_request.requested_role_id
+        ):
+
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "You cannot change the requested "
+                    "role during authorization."
+                )
+            )
+
+    # --------------------------------------------------------
+    # Determine institution
+    # --------------------------------------------------------
+
+    institution_id = (
+        approval_data.institution_id
+        if approval_data.institution_id
+        is not None
+        else registration_request.institution_id
+    )
+
+    if not institution_id:
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Institution is required."
+            )
+        )
+
+    institution = get_institution(
+        db,
+        institution_id
+    )
+
+    if not institution:
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Institution not found."
+        )
+
+    # --------------------------------------------------------
+    # Determine department
+    # --------------------------------------------------------
+
+    department_id = (
+        approval_data.department_id
+        if approval_data.department_id
+        is not None
+        else registration_request.department_id
+    )
+
+    department = None
+
+    if department_id:
+
+        department = get_department(
+            db,
+            department_id
+        )
+
+        if not department:
+
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Department not found."
+            )
+
+        if (
+            department.institution_id
+            != institution_id
+        ):
+
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Department does not belong "
+                    "to the selected institution."
+                )
+            )
+
+    # --------------------------------------------------------
+    # Determine faculty
+    #
+    # Faculty is derived from department unless Admin
+    # explicitly supplies a valid faculty.
+    # --------------------------------------------------------
+
+    faculty_id = None
+
+    if approval_data.faculty_id is not None:
+
+        faculty = get_faculty(
+            db,
+            approval_data.faculty_id
+        )
+
+        if not faculty:
+
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Faculty not found."
+            )
+
+        if (
+            faculty.institution_id
+            != institution_id
+        ):
+
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Faculty does not belong "
+                    "to the selected institution."
+                )
+            )
+
+        faculty_id = faculty.id
+
+    elif department and department.faculty_id:
+
+        faculty_id = department.faculty_id
+
+    # --------------------------------------------------------
+    # Validate faculty → department
+    # --------------------------------------------------------
+
+    if (
+        department
+        and department.faculty_id
+        and faculty_id
+        and department.faculty_id
+        != faculty_id
+    ):
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Faculty does not match "
+                "the selected department."
+            )
+        )
+
+    # --------------------------------------------------------
+    # Duplicate user
     # --------------------------------------------------------
 
     existing_user = (
         db.query(User)
         .filter(
-            User.email == registration_request.email
+            User.email
+            == registration_request.email
         )
         .first()
     )
 
     if existing_user:
+
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A user with this email already exists"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "A user with this email "
+                "already exists."
+            )
         )
 
-    # ========================================================
-    # INSTITUTION VALIDATION
-    # ========================================================
-
-    institution = None
-
-    if approval_data.institution_id is not None:
-
-        institution = (
-            db.query(Institution)
-            .filter(
-                Institution.id == approval_data.institution_id
-            )
-            .first()
-        )
-
-        if not institution:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Institution not found"
-            )
-
-    # ========================================================
-    # FACULTY VALIDATION
-    # ========================================================
-
-    faculty = None
-
-    if approval_data.faculty_id is not None:
-
-        faculty = (
-            db.query(Faculty)
-            .filter(
-                Faculty.id == approval_data.faculty_id
-            )
-            .first()
-        )
-
-        if not faculty:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Faculty not found"
-            )
-
-        if (
-            approval_data.institution_id is not None
-            and faculty.institution_id
-            != approval_data.institution_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Selected faculty does not belong "
-                    "to the selected institution"
-                )
-            )
-
-    # ========================================================
-    # DEPARTMENT VALIDATION
-    # ========================================================
-
-    department = None
-
-    if approval_data.department_id is not None:
-
-        department = (
-            db.query(Department)
-            .filter(
-                Department.id == approval_data.department_id
-            )
-            .first()
-        )
-
-        if not department:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Department not found"
-            )
-
-        if (
-            approval_data.institution_id is not None
-            and department.institution_id
-            != approval_data.institution_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Selected department does not belong "
-                    "to the selected institution"
-                )
-            )
-
-        if (
-            approval_data.faculty_id is not None
-            and department.faculty_id
-            != approval_data.faculty_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Selected department does not belong "
-                    "to the selected faculty"
-                )
-            )
-
-    # ========================================================
+    # --------------------------------------------------------
     # CREATE USER
-    # ========================================================
+    # --------------------------------------------------------
 
     new_user = User(
-        name=registration_request.full_name,
-        email=registration_request.email,
-        password_hash=registration_request.password_hash,
 
-        role_id=role.id,
+        name=
+            registration_request.full_name,
 
-        institution_id=approval_data.institution_id,
-        faculty_id=approval_data.faculty_id,
-        department_id=approval_data.department_id,
+        email=
+            registration_request.email,
+
+        password_hash=
+            registration_request.password_hash,
+
+        role_id=
+            assigned_role.id,
+
+        institution_id=
+            institution_id,
+
+        faculty_id=
+            faculty_id,
+
+        department_id=
+            department_id,
 
         is_active=True,
     )
 
     db.add(new_user)
 
-    # ========================================================
+    # --------------------------------------------------------
     # UPDATE REGISTRATION REQUEST
-    # ========================================================
+    # --------------------------------------------------------
 
     registration_request.status = "APPROVED"
 
-    registration_request.assigned_role_id = role.id
-
-    registration_request.reviewed_by = current_user.id
-
-    registration_request.reviewed_at = datetime.utcnow()
-
-    registration_request.rejection_reason = None
-
-    # Store the approved hierarchy on the request too
-    registration_request.institution_id = (
-        approval_data.institution_id
+    registration_request.assigned_role_id = (
+        assigned_role.id
     )
 
-    registration_request.faculty_id = (
-        approval_data.faculty_id
+    registration_request.reviewed_by = (
+        current_user.id
+    )
+
+    from datetime import datetime
+
+    registration_request.reviewed_at = (
+        datetime.utcnow()
+    )
+
+    registration_request.institution_id = (
+        institution_id
     )
 
     registration_request.department_id = (
-        approval_data.department_id
+        department_id
     )
-
-    # --------------------------------------------------------
-    # Save
-    # --------------------------------------------------------
 
     try:
 
         db.commit()
+
+        db.refresh(new_user)
+
+        db.refresh(
+            registration_request
+        )
 
     except Exception:
 
@@ -1218,52 +1991,86 @@ def approve_registration_request(
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to approve registration request"
+            detail=(
+                "Failed to approve registration request."
+            )
         )
 
-    db.refresh(new_user)
-    db.refresh(registration_request)
+    # --------------------------------------------------------
+    # RESPONSE
+    # --------------------------------------------------------
 
     return {
-        "message": "Registration request approved successfully",
+
+        "message":
+            "Registration request approved successfully",
+
+        "authorization": {
+
+            "authorized_by":
+                current_user.name,
+
+            "authorized_by_role":
+                current_role_name,
+
+            "requested_role":
+                requested_role.name,
+
+            "assigned_role":
+                assigned_role.name,
+        },
 
         "registration_request": {
-            "id": registration_request.id,
-            "status": registration_request.status,
-            "assigned_role": role.name,
 
-            "institution_id": (
-                registration_request.institution_id
-            ),
+            "id":
+                registration_request.id,
 
-            "faculty_id": (
-                registration_request.faculty_id
-            ),
+            "status":
+                registration_request.status,
 
-            "department_id": (
-                registration_request.department_id
-            ),
+            "reviewed_by":
+                registration_request.reviewed_by,
+
+            "reviewed_at":
+                registration_request.reviewed_at,
         },
 
         "user": {
-            "id": new_user.id,
-            "name": new_user.name,
-            "email": new_user.email,
 
-            "role_id": new_user.role_id,
-            "role": role.name,
+            "id":
+                new_user.id,
 
-            "institution_id": new_user.institution_id,
-            "faculty_id": new_user.faculty_id,
-            "department_id": new_user.department_id,
+            "name":
+                new_user.name,
 
-            "is_active": new_user.is_active,
+            "email":
+                new_user.email,
+
+            "role_id":
+                new_user.role_id,
+
+            "role":
+                assigned_role.name,
+
+            "institution_id":
+                new_user.institution_id,
+
+            "faculty_id":
+                new_user.faculty_id,
+
+            "department_id":
+                new_user.department_id,
+
+            "is_active":
+                new_user.is_active,
         }
     }
 
 
 # ============================================================
 # REJECT REGISTRATION REQUEST
+#
+# Same hierarchy applies.
 # ============================================================
 
 @router.post(
@@ -1273,77 +2080,128 @@ def reject_registration_request(
     request_id: int,
     rejection_data: RegistrationRejectionRequest,
     current_user: User = Depends(
-        require_permission("USER_MANAGEMENT", "Edit")
+        get_current_user
     ),
     db: Session = Depends(get_db)
 ):
+
     registration_request = (
         db.query(RegistrationRequest)
         .filter(
-            RegistrationRequest.id == request_id
+            RegistrationRequest.id
+            == request_id
         )
         .first()
     )
 
     if not registration_request:
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Registration request not found"
-        )
-
-    # --------------------------------------------------------
-    # Only pending requests can be rejected
-    # --------------------------------------------------------
-
-    if registration_request.status != "PENDING":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"Registration request is already "
-                f"{registration_request.status}"
+                "Registration request not found"
             )
         )
 
     # --------------------------------------------------------
-    # Validate reason
+    # Must be pending
     # --------------------------------------------------------
 
-    reason = rejection_data.reason.strip()
+    if (
+        registration_request.status
+        != "PENDING"
+    ):
 
-    if not reason:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Rejection reason cannot be empty"
+            detail=(
+                "Only pending registration "
+                "requests can be rejected."
+            )
         )
 
     # --------------------------------------------------------
-    # Update request
+    # Hierarchical authorization
     # --------------------------------------------------------
+
+    validate_registration_approval(
+        db=db,
+        registration_request=
+            registration_request,
+        current_user=current_user,
+    )
+
+    # --------------------------------------------------------
+    # Reject
+    # --------------------------------------------------------
+
+    from datetime import datetime
 
     registration_request.status = "REJECTED"
 
-    registration_request.reviewed_by = current_user.id
+    registration_request.reviewed_by = (
+        current_user.id
+    )
 
-    registration_request.reviewed_at = datetime.utcnow()
+    registration_request.reviewed_at = (
+        datetime.utcnow()
+    )
 
-    registration_request.rejection_reason = reason
+    registration_request.rejection_reason = (
+        rejection_data.reason
+    )
 
-    # --------------------------------------------------------
-    # Save
-    # --------------------------------------------------------
+    try:
 
-    db.commit()
+        db.commit()
 
-    db.refresh(registration_request)
+        db.refresh(
+            registration_request
+        )
+
+    except Exception:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "Failed to reject registration request."
+            )
+        )
 
     return {
-        "message": "Registration request rejected successfully",
+
+        "message":
+            "Registration request rejected successfully",
+
+        "authorization": {
+
+            "rejected_by":
+                current_user.name,
+
+            "rejected_by_role":
+                get_role_name(
+                    db,
+                    current_user.role_id
+                ),
+        },
 
         "registration_request": {
-            "id": registration_request.id,
-            "status": registration_request.status,
-            "rejection_reason": (
-                registration_request.rejection_reason
-            ),
+
+            "id":
+                registration_request.id,
+
+            "status":
+                registration_request.status,
+
+            "rejection_reason":
+                registration_request.rejection_reason,
+
+            "reviewed_by":
+                registration_request.reviewed_by,
+
+            "reviewed_at":
+                registration_request.reviewed_at,
         }
     }

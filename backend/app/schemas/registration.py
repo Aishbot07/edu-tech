@@ -1,48 +1,22 @@
 from pydantic import BaseModel, EmailStr, Field
 
 
-# ============================================================
-# REGISTRATION
-# ============================================================
-
 class RegistrationRequestCreate(BaseModel):
-    full_name: str = Field(
-        min_length=2,
-        max_length=150
-    )
-
+    full_name: str = Field(min_length=2, max_length=150)
     email: EmailStr
 
-    # Display names - kept for compatibility
-    institution: str = Field(
-        min_length=2,
-        max_length=250
-    )
+    institution: str = Field(min_length=2, max_length=250)
+    institution_id: int
 
-    department: str = Field(
-        min_length=2,
-        max_length=150
-    )
+    department: str = Field(min_length=2, max_length=150)
+    department_id: int
 
-    designation: str = Field(
-        min_length=2,
-        max_length=150
-    )
+    # Role requested by the user during registration
+    role_id: int
 
-    password: str = Field(
-        min_length=8,
-        max_length=128
-    )
+    designation: str = Field(min_length=2, max_length=150)
 
-    # ========================================================
-    # HIERARCHY IDs
-    # ========================================================
-
-    institution_id: int | None = None
-
-    faculty_id: int | None = None
-
-    department_id: int | None = None
+    password: str = Field(min_length=8, max_length=128)
 
 
 class RegistrationRequestResponse(BaseModel):

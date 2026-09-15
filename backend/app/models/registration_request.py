@@ -18,122 +18,115 @@ class RegistrationRequest(Base):
     id = Column(
         Integer,
         primary_key=True,
-        index=True
+        index=True,
     )
-
-    # ========================================================
-    # APPLICANT INFORMATION
-    # ========================================================
 
     full_name = Column(
         String(150),
-        nullable=False
+        nullable=False,
     )
 
     email = Column(
         String(150),
         nullable=False,
-        index=True
+        index=True,
     )
 
     institution = Column(
         String(250),
-        nullable=False
+        nullable=False,
     )
 
-    # Institution ID
     institution_id = Column(
         Integer,
         ForeignKey("institutions.id"),
         nullable=True,
-        index=True
-    )
-
-    # Faculty ID
-    faculty_id = Column(
-        Integer,
-        ForeignKey("faculties.id"),
-        nullable=True,
-        index=True
+        index=True,
     )
 
     department = Column(
         String(150),
-        nullable=False
+        nullable=False,
     )
 
-    # Department ID
     department_id = Column(
         Integer,
         ForeignKey("departments.id"),
         nullable=True,
-        index=True
+        index=True,
     )
 
     designation = Column(
         String(150),
-        nullable=False
+        nullable=False,
     )
 
-    # ========================================================
-    # PASSWORD
-    # ========================================================
-
-    # Password is stored hashed, never plain text
     password_hash = Column(
         String(255),
-        nullable=False
+        nullable=False,
     )
 
     # ========================================================
-    # REGISTRATION WORKFLOW
+    # ROLE REQUESTED BY APPLICANT
+    # ========================================================
+
+    requested_role_id = Column(
+        Integer,
+        ForeignKey("roles.id"),
+        nullable=True,
+        index=True,
+    )
+
+    # ========================================================
+    # FINAL ROLE ASSIGNED AFTER AUTHORIZATION
+    # ========================================================
+
+    assigned_role_id = Column(
+        Integer,
+        nullable=True,
+        index=True,
+    )
+
+    # ========================================================
+    # REGISTRATION STATUS
     # ========================================================
 
     status = Column(
-        String(30),
+        String(50),
         nullable=False,
-        default="PENDING"
-    )
-
-    # Role will be assigned AFTER approval
-    assigned_role_id = Column(
-        Integer,
-        nullable=True
+        default="PENDING",
+        index=True,
     )
 
     # ========================================================
-    # REVIEW INFORMATION
+    # WHO AUTHORIZED / REJECTED
     # ========================================================
 
-    # Admin/authorized person who processed the request
     reviewed_by = Column(
         Integer,
-        nullable=True
+        ForeignKey("users.id"),
+        nullable=True,
     )
 
     reviewed_at = Column(
         DateTime,
-        nullable=True
+        nullable=True,
     )
 
     rejection_reason = Column(
         Text,
-        nullable=True
+        nullable=True,
     )
-
-    # ========================================================
-    # TIMESTAMPS
-    # ========================================================
 
     created_at = Column(
         DateTime,
         default=datetime.utcnow,
-        nullable=False
+        nullable=False,
     )
 
     updated_at = Column(
         DateTime,
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
-        nullable=False
+        nullable=False,
     )

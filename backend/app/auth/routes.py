@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.database import SessionLocal
@@ -9,14 +9,13 @@ from app.models import (
     Module,
     Permission,
     RoleModulePermission,
-    RegistrationRequest,
     Institution,
     Faculty,
     Department,
+    RegistrationRequest,
 )
 
 from app.schemas.auth import LoginRequest
-
 from app.schemas.registration import (
     RegistrationRequestCreate,
     RegistrationRequestResponse,
@@ -43,6 +42,7 @@ router = APIRouter(
 
 def get_db():
     db = SessionLocal()
+
     try:
         yield db
     finally:
@@ -50,284 +50,173 @@ def get_db():
 
 
 # ============================================================
-# PUBLIC REGISTRATION LOOKUP APIs
-# These APIs are available before login.
+# EXISTING PROJECT ROLE NAMES
+#
+# DO NOT RENAME THESE.
+# These are the actual database role names.
 # ============================================================
 
-@router.get("/institutions")
-def get_registration_institutions(
-    db: Session = Depends(get_db)
-):
-    institutions = (
-        db.query(Institution)
-        .order_by(Institution.name)
-        .all()
-    )
+ADMIN_ROLE = "Admin"
 
-    return [
-        {
-            "id": institution.id,
-            "name": institution.name,
-        }
-        for institution in institutions
-    ]
+NAAC_COORDINATOR_ROLE = "NAAC Coordinator"
 
+COMMITTEE_MEMBER_ROLE = "Committee Member"
 
-@router.get("/faculties")
-def get_registration_faculties(
-    institution_id: int,
-    db: Session = Depends(get_db)
-):
-    faculties = (
-        db.query(Faculty)
-        .filter(
-            Faculty.institution_id == institution_id
-        )
-        .order_by(Faculty.name)
-        .all()
-    )
+DEPT_COORDINATOR_ROLE = "Dept. Coordinator"
 
-    return [
-        {
-            "id": faculty.id,
-            "name": faculty.name,
-            "institution_id": faculty.institution_id,
-        }
-        for faculty in faculties
-    ]
+REVIEWER_ROLE = "Reviewer"
 
+DATA_APPROVER_ROLE = "Data Approver"
 
-@router.get("/departments")
-def get_registration_departments(
-    institution_id: int,
-    faculty_id: int,
-    db: Session = Depends(get_db)
-):
-    departments = (
-        db.query(Department)
-        .filter(
-            Department.institution_id == institution_id,
-            Department.faculty_id == faculty_id,
-        )
-        .order_by(Department.name)
-        .all()
-    )
-
-    return [
-        {
-            "id": department.id,
-            "name": department.name,
-            "institution_id": department.institution_id,
-            "faculty_id": department.faculty_id,
-        }
-        for department in departments
-    ]
+PRINCIPAL_DIRECTOR_ROLE = "Principal / Director"
 
 
 # ============================================================
-# REGISTRATION
+# REGISTRATION AUTHORITY HIERARCHY
+#
+# Applicant Role
+#       ↓
+# Required Approver
+#
+# Client hierarchy mapped to existing project roles:
+#
+# Faculty / Staff      = Committee Member
+# Department HOD       = Dept. Coordinator
+# IQAC Coordinator     = NAAC Coordinator
+# Institution Admin    = Principal / Director
+# NAAC Admin            = Admin
+#
 # ============================================================
 
-@router.post(
-    "/register",
-    response_model=RegistrationRequestResponse
-)
-def register(
-    registration_data: RegistrationRequestCreate,
-    db: Session = Depends(get_db)
+REGISTRATION_AUTHORITY = {
+
+    # Faculty / Staff
+    COMMITTEE_MEMBER_ROLE:
+        DEPT_COORDINATOR_ROLE,
+
+    # Department HOD
+    DEPT_COORDINATOR_ROLE:
+        NAAC_COORDINATOR_ROLE,
+
+    # IQAC Coordinator
+    NAAC_COORDINATOR_ROLE:
+        PRINCIPAL_DIRECTOR_ROLE,
+
+    # Institution Admin
+    PRINCIPAL_DIRECTOR_ROLE:
+        ADMIN_ROLE,
+
+    # External accreditation roles
+    REVIEWER_ROLE:
+        ADMIN_ROLE,
+
+    DATA_APPROVER_ROLE:
+        ADMIN_ROLE,
+}
+
+
+# ============================================================
+# PUBLIC REGISTRATION ROLES
+#
+# Admin is NOT publicly selectable.
+# ============================================================
+
+PUBLIC_REGISTRATION_ROLES = {
+    NAAC_COORDINATOR_ROLE,
+    COMMITTEE_MEMBER_ROLE,
+    DEPT_COORDINATOR_ROLE,
+    REVIEWER_ROLE,
+    DATA_APPROVER_ROLE,
+    PRINCIPAL_DIRECTOR_ROLE,
+}
+
+
+# ============================================================
+# GET ROLE BY ID
+# ============================================================
+
+def get_role_by_id(
+    db: Session,
+    role_id: int | None,
 ):
-    email = registration_data.email.strip().lower()
+    if not role_id:
+        return None
 
-    full_name = registration_data.full_name.strip()
-    designation = registration_data.designation.strip()
-
-    # --------------------------------------------------------
-    # CHECK EXISTING USER
-    # --------------------------------------------------------
-
-    existing_user = (
-        db.query(User)
-        .filter(User.email == email)
+    return (
+        db.query(Role)
+        .filter(Role.id == role_id)
         .first()
     )
 
-    if existing_user:
-        raise HTTPException(
-            status_code=409,
-            detail="An account with this email already exists."
-        )
 
-    # --------------------------------------------------------
-    # CHECK PENDING REQUEST
-    # --------------------------------------------------------
+# ============================================================
+# GET ROLE NAME
+# ============================================================
 
-    existing_request = (
-        db.query(RegistrationRequest)
+def get_role_name(
+    db: Session,
+    role_id: int | None,
+):
+    role = get_role_by_id(
+        db,
+        role_id,
+    )
+
+    if not role:
+        return None
+
+    return role.name
+
+
+# ============================================================
+# GET REQUIRED APPROVER ROLE
+# ============================================================
+
+def get_required_approver_role(
+    db: Session,
+    requested_role_id: int,
+):
+    requested_role = get_role_by_id(
+        db,
+        requested_role_id,
+    )
+
+    if not requested_role:
+        return None
+
+    approver_role_name = REGISTRATION_AUTHORITY.get(
+        requested_role.name
+    )
+
+    if not approver_role_name:
+        return None
+
+    return (
+        db.query(Role)
         .filter(
-            RegistrationRequest.email == email,
-            RegistrationRequest.status == "PENDING"
+            Role.name == approver_role_name
         )
         .first()
     )
 
-    if existing_request:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "A registration request for this email "
-                "is already pending."
-            )
-        )
 
-    # --------------------------------------------------------
-    # VALIDATE INSTITUTION
-    # --------------------------------------------------------
+# ============================================================
+# GET REQUIRED APPROVER NAME
+# ============================================================
 
-    if registration_data.institution_id is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Institution selection is required."
-        )
-
-    institution = (
-        db.query(Institution)
-        .filter(
-            Institution.id == registration_data.institution_id
-        )
-        .first()
+def get_required_approver_name(
+    db: Session,
+    requested_role_id: int,
+):
+    approver_role = get_required_approver_role(
+        db,
+        requested_role_id,
     )
 
-    if not institution:
-        raise HTTPException(
-            status_code=404,
-            detail="Selected institution not found."
-        )
+    if not approver_role:
+        return None
 
-    # --------------------------------------------------------
-    # VALIDATE FACULTY
-    # --------------------------------------------------------
-
-    if registration_data.faculty_id is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Faculty selection is required."
-        )
-
-    faculty = (
-        db.query(Faculty)
-        .filter(
-            Faculty.id == registration_data.faculty_id
-        )
-        .first()
-    )
-
-    if not faculty:
-        raise HTTPException(
-            status_code=404,
-            detail="Selected faculty not found."
-        )
-
-    if faculty.institution_id != institution.id:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Selected faculty does not belong "
-                "to the selected institution."
-            )
-        )
-
-    # --------------------------------------------------------
-    # VALIDATE DEPARTMENT
-    # --------------------------------------------------------
-
-    if registration_data.department_id is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Department selection is required."
-        )
-
-    department = (
-        db.query(Department)
-        .filter(
-            Department.id == registration_data.department_id
-        )
-        .first()
-    )
-
-    if not department:
-        raise HTTPException(
-            status_code=404,
-            detail="Selected department not found."
-        )
-
-    if department.institution_id != institution.id:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Selected department does not belong "
-                "to the selected institution."
-            )
-        )
-
-    if department.faculty_id != faculty.id:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Selected department does not belong "
-                "to the selected faculty."
-            )
-        )
-
-    # --------------------------------------------------------
-    # PASSWORD HASH
-    # --------------------------------------------------------
-
-    password_hash = hash_password(
-        registration_data.password
-    )
-
-    # --------------------------------------------------------
-    # CREATE REGISTRATION REQUEST
-    # --------------------------------------------------------
-
-    registration_request = RegistrationRequest(
-        full_name=full_name,
-        email=email,
-
-        institution=institution.name,
-        institution_id=institution.id,
-
-        faculty_id=faculty.id,
-
-        department=department.name,
-        department_id=department.id,
-
-        designation=designation,
-
-        password_hash=password_hash,
-
-        status="PENDING",
-
-        assigned_role_id=None,
-        reviewed_by=None,
-        reviewed_at=None,
-        rejection_reason=None,
-    )
-
-    db.add(registration_request)
-
-    db.commit()
-
-    db.refresh(registration_request)
-
-    return {
-        "message": (
-            "Registration request submitted successfully. "
-            "Your account is pending approval."
-        ),
-        "request_id": registration_request.id,
-        "status": registration_request.status,
-    }
+    return approver_role.name
 
 
 # ============================================================
@@ -339,58 +228,84 @@ def login(
     login_data: LoginRequest,
     db: Session = Depends(get_db)
 ):
+
+    # --------------------------------------------------------
+    # Find user
+    # --------------------------------------------------------
+
     user = (
         db.query(User)
         .filter(
-            User.email == login_data.email.strip().lower()
+            User.email == login_data.email
         )
         .first()
     )
 
     if not user:
         raise HTTPException(
-            status_code=401,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
         )
 
+    # --------------------------------------------------------
+    # Check active account
+    # --------------------------------------------------------
+
     if not user.is_active:
         raise HTTPException(
-            status_code=403,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive"
         )
+
+    # --------------------------------------------------------
+    # Verify password
+    # --------------------------------------------------------
 
     if not verify_password(
         login_data.password,
         user.password_hash
     ):
         raise HTTPException(
-            status_code=401,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password"
         )
 
     # --------------------------------------------------------
-    # GET ROLE
+    # Get actual role from database
     # --------------------------------------------------------
 
     role = (
         db.query(Role)
-        .filter(Role.id == user.role_id)
+        .filter(
+            Role.id == user.role_id
+        )
         .first()
     )
 
-    actual_role_name = role.name if role else None
+    if not role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User role not found"
+        )
+
+    actual_role_name = role.name
 
     # --------------------------------------------------------
-    # VALIDATE SELECTED ROLE
+    # Validate selected role
     # --------------------------------------------------------
 
     if login_data.role:
 
         def normalize_role(role_name):
+
             if not role_name:
                 return ""
 
-            clean = role_name.strip().lower()
+            clean = (
+                role_name
+                .strip()
+                .lower()
+            )
 
             clean = (
                 clean
@@ -401,23 +316,43 @@ def login(
                 .replace(" ", "")
             )
 
+            # Existing project role mappings
             if clean in [
                 "departmentcoordinator",
-                "deptcoordinator"
+                "deptcoordinator",
             ]:
                 return "deptcoordinator"
 
             if clean in [
                 "principaldirector",
-                "principal"
+                "principal",
             ]:
                 return "principaldirector"
 
             if clean in [
                 "naaccoordinator",
-                "coordinator"
+                "coordinator",
             ]:
                 return "naaccoordinator"
+
+            if clean in [
+                "committeemember",
+                "facultystaff",
+                "facultystaffmember",
+            ]:
+                return "committeemember"
+
+            if clean in [
+                "dataapprover",
+            ]:
+                return "dataapprover"
+
+            if clean in [
+                "reviewer",
+                "peerteam",
+                "dwreviewer",
+            ]:
+                return "reviewer"
 
             return clean
 
@@ -426,7 +361,7 @@ def login(
             != normalize_role(actual_role_name)
         ):
             raise HTTPException(
-                status_code=401,
+                status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=(
                     "Selected role does not match "
                     "your account role."
@@ -434,24 +369,32 @@ def login(
             )
 
     # --------------------------------------------------------
-    # CREATE JWT
+    # Create JWT
     # --------------------------------------------------------
 
     access_token = create_access_token({
+
         "user_id": user.id,
+
         "email": user.email,
+
         "role": actual_role_name,
 
+        "role_id": user.role_id,
+
         "institution_id": user.institution_id,
+
         "faculty_id": user.faculty_id,
+
         "department_id": user.department_id,
     })
 
     # --------------------------------------------------------
-    # RESPONSE
+    # Login response
     # --------------------------------------------------------
 
     return {
+
         "message": "Login successful",
 
         "access_token": access_token,
@@ -459,14 +402,24 @@ def login(
         "token_type": "bearer",
 
         "user": {
+
             "id": user.id,
+
             "name": user.name,
+
             "email": user.email,
+
             "role": actual_role_name,
 
+            "role_id": user.role_id,
+
             "institution_id": user.institution_id,
+
             "faculty_id": user.faculty_id,
+
             "department_id": user.department_id,
+
+            "is_active": user.is_active,
         }
     }
 
@@ -480,86 +433,575 @@ def get_me(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+
+    # --------------------------------------------------------
+    # Get user's role
+    # --------------------------------------------------------
+
     role = (
         db.query(Role)
-        .filter(Role.id == current_user.role_id)
+        .filter(
+            Role.id == current_user.role_id
+        )
         .first()
     )
 
     if not role:
         raise HTTPException(
-            status_code=403,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="User role not found"
         )
 
     # --------------------------------------------------------
-    # GET ROLE PERMISSIONS
+    # Get role permissions
     # --------------------------------------------------------
 
     role_permissions = (
+
         db.query(
             Module,
             Permission,
             RoleModulePermission
         )
+
         .join(
             RoleModulePermission,
-            RoleModulePermission.module_id == Module.id
+            RoleModulePermission.module_id
+            == Module.id
         )
+
         .join(
             Permission,
-            Permission.id == RoleModulePermission.permission_id
+            Permission.id
+            == RoleModulePermission.permission_id
         )
+
         .filter(
-            RoleModulePermission.role_id == role.id,
-            RoleModulePermission.allowed == True
+            RoleModulePermission.role_id
+            == role.id,
+
+            RoleModulePermission.allowed
+            == True
         )
+
         .all()
     )
 
+    # --------------------------------------------------------
+    # Organize permissions module-wise
+    # --------------------------------------------------------
+
     permissions_by_module = {}
 
-    for module, permission, mapping in role_permissions:
+    for (
+        module,
+        permission,
+        mapping
+    ) in role_permissions:
 
         if module.code not in permissions_by_module:
 
-            permissions_by_module[module.code] = {
+            permissions_by_module[
+                module.code
+            ] = {
+
                 "module_id": module.id,
+
                 "module_name": module.name,
+
                 "module_code": module.code,
+
                 "permissions": []
             }
 
         permissions_by_module[
             module.code
-        ]["permissions"].append(
+        ][
+            "permissions"
+        ].append(
             permission.name
         )
 
     # --------------------------------------------------------
-    # RESPONSE
+    # Return authenticated user
     # --------------------------------------------------------
 
     return {
+
         "user": {
+
             "id": current_user.id,
+
             "name": current_user.name,
+
             "email": current_user.email,
 
-            "institution_id": current_user.institution_id,
-            "faculty_id": current_user.faculty_id,
-            "department_id": current_user.department_id,
+            "institution_id":
+                current_user.institution_id,
 
-            "is_active": current_user.is_active
+            "faculty_id":
+                current_user.faculty_id,
+
+            "department_id":
+                current_user.department_id,
+
+            "is_active":
+                current_user.is_active
         },
 
         "role": {
+
             "id": role.id,
+
             "name": role.name,
+
             "description": role.description
         },
 
-        "permissions": list(
-            permissions_by_module.values()
-        )
+        "permissions":
+            list(
+                permissions_by_module.values()
+            )
     }
+
+
+# ============================================================
+# GET INSTITUTIONS
+#
+# Public endpoint used by registration page.
+# ============================================================
+
+@router.get("/institutions")
+def get_registration_institutions(
+    db: Session = Depends(get_db)
+):
+
+    institutions = (
+        db.query(Institution)
+        .order_by(Institution.id)
+        .all()
+    )
+
+    return [
+        {
+            "id": institution.id,
+            "name": institution.name,
+            "code": institution.code,
+            "city": institution.city,
+            "state": institution.state,
+            "institution_type":
+                institution.institution_type,
+            "established_year":
+                institution.established_year,
+            "website":
+                institution.website,
+        }
+        for institution in institutions
+    ]
+
+
+# ============================================================
+# GET FACULTIES
+#
+# Public endpoint used by registration page.
+#
+# institution_id is optional.
+# ============================================================
+
+@router.get("/faculties")
+def get_registration_faculties(
+    institution_id: int | None = None,
+    db: Session = Depends(get_db)
+):
+
+    query = db.query(Faculty)
+
+    if institution_id is not None:
+
+        query = query.filter(
+            Faculty.institution_id
+            == institution_id
+        )
+
+    faculties = (
+        query
+        .order_by(Faculty.id)
+        .all()
+    )
+
+    return [
+        {
+            "id": faculty.id,
+
+            "institution_id":
+                faculty.institution_id,
+
+            "name": faculty.name,
+
+            "code": faculty.code,
+
+            "dean_name":
+                faculty.dean_name,
+        }
+        for faculty in faculties
+    ]
+
+
+# ============================================================
+# GET DEPARTMENTS
+#
+# Public endpoint used by registration page.
+#
+# institution_id and faculty_id are optional.
+# ============================================================
+
+@router.get("/departments")
+def get_registration_departments(
+    institution_id: int | None = None,
+    faculty_id: int | None = None,
+    db: Session = Depends(get_db)
+):
+
+    query = db.query(Department)
+
+    if institution_id is not None:
+
+        query = query.filter(
+            Department.institution_id
+            == institution_id
+        )
+
+    if faculty_id is not None:
+
+        query = query.filter(
+            Department.faculty_id
+            == faculty_id
+        )
+
+    departments = (
+        query
+        .order_by(Department.id)
+        .all()
+    )
+
+    return [
+        {
+            "id": department.id,
+
+            "institution_id":
+                department.institution_id,
+
+            "faculty_id":
+                department.faculty_id,
+
+            "name":
+                department.name,
+
+            "code":
+                department.code,
+
+            "head_name":
+                department.head_name,
+        }
+        for department in departments
+    ]
+
+
+# ============================================================
+# PUBLIC REGISTRATION
+#
+# Applicant submits a registration request.
+#
+# IMPORTANT:
+# User is NOT created here.
+#
+# Request goes to the correct authority.
+# ============================================================
+
+@router.post(
+    "/register",
+    response_model=RegistrationRequestResponse
+)
+def register(
+    registration_data: RegistrationRequestCreate,
+    db: Session = Depends(get_db)
+):
+
+    # --------------------------------------------------------
+    # Validate requested role
+    # --------------------------------------------------------
+
+    requested_role = (
+        db.query(Role)
+        .filter(
+            Role.id
+            == registration_data.role_id
+        )
+        .first()
+    )
+
+    if not requested_role:
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selected role was not found."
+        )
+
+    # --------------------------------------------------------
+    # Admin cannot be requested publicly
+    # --------------------------------------------------------
+
+    if requested_role.name == ADMIN_ROLE:
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Admin accounts cannot be created "
+                "through public registration."
+            )
+        )
+
+    # --------------------------------------------------------
+    # Make sure role is allowed for registration
+    # --------------------------------------------------------
+
+    if (
+        requested_role.name
+        not in PUBLIC_REGISTRATION_ROLES
+    ):
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "The selected role is not available "
+                "for public registration."
+            )
+        )
+
+    # --------------------------------------------------------
+    # Find next authority
+    # --------------------------------------------------------
+
+    approver_role_name = (
+        REGISTRATION_AUTHORITY.get(
+            requested_role.name
+        )
+    )
+
+    if not approver_role_name:
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "No registration authority is "
+                "configured for this role."
+            )
+        )
+
+    # --------------------------------------------------------
+    # Verify institution
+    # --------------------------------------------------------
+
+    institution = (
+        db.query(Institution)
+        .filter(
+            Institution.id
+            == registration_data.institution_id
+        )
+        .first()
+    )
+
+    if not institution:
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Institution not found."
+        )
+
+    # --------------------------------------------------------
+    # Verify department
+    # --------------------------------------------------------
+
+    department = (
+        db.query(Department)
+        .filter(
+            Department.id
+            == registration_data.department_id
+        )
+        .first()
+    )
+
+    if not department:
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Department not found."
+        )
+
+    # --------------------------------------------------------
+    # Department must belong to institution
+    # --------------------------------------------------------
+
+    if (
+        department.institution_id
+        != registration_data.institution_id
+    ):
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Selected department does not belong "
+                "to the selected institution."
+            )
+        )
+
+    # --------------------------------------------------------
+    # Check duplicate active user
+    # --------------------------------------------------------
+
+    existing_user = (
+        db.query(User)
+        .filter(
+            User.email
+            == registration_data.email
+        )
+        .first()
+    )
+
+    if existing_user:
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "A user with this email "
+                "already exists."
+            )
+        )
+
+    # --------------------------------------------------------
+    # Check duplicate pending request
+    # --------------------------------------------------------
+
+    existing_request = (
+        db.query(RegistrationRequest)
+        .filter(
+            RegistrationRequest.email
+            == registration_data.email,
+
+            RegistrationRequest.status
+            == "PENDING"
+        )
+        .first()
+    )
+
+    if existing_request:
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "A pending registration request "
+                "already exists for this email."
+            )
+        )
+
+    # --------------------------------------------------------
+    # Create registration request
+    #
+    # Faculty is NOT stored in registration_requests.
+    # It is derived from Department.faculty_id.
+    # --------------------------------------------------------
+
+    registration_request = RegistrationRequest(
+
+        full_name=
+            registration_data.full_name,
+
+        email=
+            registration_data.email,
+
+        institution=
+            institution.name,
+
+        institution_id=
+            institution.id,
+
+        department=
+            department.name,
+
+        department_id=
+            department.id,
+
+        designation=
+            registration_data.designation,
+
+        password_hash=
+            hash_password(
+                registration_data.password
+            ),
+
+        requested_role_id=
+            requested_role.id,
+
+        assigned_role_id=
+            None,
+
+        status=
+            "PENDING",
+
+        reviewed_by=
+            None,
+
+        reviewed_at=
+            None,
+
+        rejection_reason=
+            None,
+    )
+
+    db.add(
+        registration_request
+    )
+
+    # --------------------------------------------------------
+    # Commit safely
+    # --------------------------------------------------------
+
+    try:
+
+        db.commit()
+
+        db.refresh(
+            registration_request
+        )
+
+    except Exception:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "Failed to create registration request."
+            )
+        )
+
+    # --------------------------------------------------------
+    # Response
+    # --------------------------------------------------------
+
+    return RegistrationRequestResponse(
+
+        message=(
+            "Registration request submitted "
+            "successfully."
+        ),
+
+        request_id=
+            registration_request.id,
+
+        status=
+            registration_request.status,
+
+        next_authority=
+            approver_role_name,
+    )

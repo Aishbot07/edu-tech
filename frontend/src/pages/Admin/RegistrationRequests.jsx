@@ -10,18 +10,88 @@ import {
   Clock,
   Users,
   Building2,
-  GraduationCap,
-  BriefcaseBusiness,
   X,
   AlertCircle,
   UserCheck,
+  ShieldCheck,
 } from "lucide-react";
 
 import api from "../../services/api";
 import "./RegistrationRequests.css";
 
+const APPROVAL_ROLES = [
+  "Admin",
+  "Principal / Director",
+  "NAAC Coordinator",
+  "Dept. Coordinator",
+];
+
+const ROLE_AUTHORITY = {
+  "Committee Member": "Dept. Coordinator",
+  "Dept. Coordinator": "NAAC Coordinator",
+  "NAAC Coordinator": "Principal / Director",
+  "Principal / Director": "Admin",
+  Reviewer: "Admin",
+  "Data Approver": "Admin",
+};
+
+const normalizeRole = (role) => {
+  if (!role) return "";
+
+  const value = String(role)
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+
+  if (value === "admin") return "Admin";
+
+  if (
+    value === "principal" ||
+    value === "principal director" ||
+    value === "principal / director"
+  ) {
+    return "Principal / Director";
+  }
+
+  if (
+    value === "coordinator" ||
+    value === "naac coordinator"
+  ) {
+    return "NAAC Coordinator";
+  }
+
+  if (
+    value === "department coordinator" ||
+    value === "dept coordinator" ||
+    value === "dept. coordinator"
+  ) {
+    return "Dept. Coordinator";
+  }
+
+  if (value === "committee member") {
+    return "Committee Member";
+  }
+
+  if (value === "reviewer") {
+    return "Reviewer";
+  }
+
+  if (value === "data approver") {
+    return "Data Approver";
+  }
+
+  return String(role).trim();
+};
+
 const RegistrationRequests = () => {
   const navigate = useNavigate();
+
+  // =========================
+  // CURRENT USER
+  // =========================
+
+  const [currentUser, setCurrentUser] = useState(null);
+  const [currentRole, setCurrentRole] = useState("");
 
   // =========================
   // STATE
@@ -58,27 +128,63 @@ const RegistrationRequests = () => {
   const [success, setSuccess] = useState("");
 
   // =========================
-  // ADMIN CHECK
+  // LOAD CURRENT USER
   // =========================
 
   useEffect(() => {
-    const storedUser = localStorage.getItem("user");
+    const loadCurrentUser = async () => {
+      try {
+        const storedUser = localStorage.getItem("user");
 
-    if (!storedUser) {
-      navigate("/login");
-      return;
-    }
+        if (storedUser) {
+          const user = JSON.parse(storedUser);
 
-    try {
-      const user = JSON.parse(storedUser);
+          setCurrentUser(user);
 
-      if (user.role !== "Admin") {
+          const role = normalizeRole(
+            user?.role ||
+              user?.role_name ||
+              user?.roleName
+          );
+
+          setCurrentRole(role);
+
+          if (!APPROVAL_ROLES.includes(role)) {
+            navigate("/login");
+            return;
+          }
+
+          return;
+        }
+
+        const response = await api.get("/auth/me");
+
+        const user = response.data;
+
+        setCurrentUser(user);
+
+        const role = normalizeRole(
+          user?.role ||
+            user?.role_name ||
+            user?.roleName
+        );
+
+        setCurrentRole(role);
+
+        if (!APPROVAL_ROLES.includes(role)) {
+          navigate("/login");
+        }
+      } catch (err) {
+        console.error(
+          "CURRENT USER LOAD ERROR:",
+          err
+        );
+
         navigate("/login");
       }
-    } catch (err) {
-      console.error("USER PARSE ERROR:", err);
-      navigate("/login");
-    }
+    };
+
+    loadCurrentUser();
   }, [navigate]);
 
   // =========================
@@ -95,76 +201,214 @@ const RegistrationRequests = () => {
         setLoading(true);
       }
 
+      /*
+       * IMPORTANT:
+       * Registration requests are available through the
+       * hierarchical backend endpoint.
+       *
+       * /admin/roles is ONLY needed by Admin.
+       *
+       * Non-admin approval roles must NOT call /admin/roles.
+       */
+
+      const requestsPromise = api.get(
+        "/admin/registration-requests"
+      );
+
+      const institutionsPromise = api.get(
+        "/institutions"
+      );
+
+      const facultiesPromise = api.get(
+        "/faculties"
+      );
+
+      const departmentsPromise = api.get(
+        "/departments"
+      );
+
+      let rolesPromise = Promise.resolve({
+        data: [],
+      });
+
+      if (currentRole === "Admin") {
+        rolesPromise = api.get("/admin/roles");
+      }
+
       const [
-        requestsResponse,
-        rolesResponse,
-        institutionsResponse,
-        facultiesResponse,
-        departmentsResponse,
-      ] = await Promise.all([
-        api.get("/admin/registration-requests"),
-        api.get("/admin/roles"),
-        api.get("/institutions"),
-        api.get("/faculties"),
-        api.get("/departments"),
+        requestsResult,
+        rolesResult,
+        institutionsResult,
+        facultiesResult,
+        departmentsResult,
+      ] = await Promise.allSettled([
+        requestsPromise,
+        rolesPromise,
+        institutionsPromise,
+        facultiesPromise,
+        departmentsPromise,
       ]);
 
-      console.log(
-        "REGISTRATION REQUESTS:",
-        requestsResponse.data
-      );
+      // =========================
+      // REGISTRATION REQUESTS
+      // =========================
 
-      console.log(
-        "ROLES:",
-        rolesResponse.data
-      );
+      if (
+        requestsResult.status === "fulfilled"
+      ) {
+        const data =
+          requestsResult.value?.data;
 
-      console.log(
-        "INSTITUTIONS:",
-        institutionsResponse.data
-      );
+        console.log(
+          "REGISTRATION REQUESTS:",
+          data
+        );
 
-      console.log(
-        "FACULTIES:",
-        facultiesResponse.data
-      );
+        setRequests(
+          Array.isArray(data)
+            ? data
+            : data?.requests ||
+                data?.data ||
+                []
+        );
+      } else {
+        throw requestsResult.reason;
+      }
 
-      console.log(
-        "DEPARTMENTS:",
-        departmentsResponse.data
-      );
+      // =========================
+      // ROLES
+      // =========================
 
-      setRequests(
-        Array.isArray(requestsResponse.data)
-          ? requestsResponse.data
-          : []
-      );
+      if (
+        rolesResult.status === "fulfilled"
+      ) {
+        const data =
+          rolesResult.value?.data;
 
-      setRoles(
-        Array.isArray(rolesResponse.data)
-          ? rolesResponse.data
-          : []
-      );
+        console.log("ROLES:", data);
 
-      setInstitutions(
-        Array.isArray(institutionsResponse.data)
-          ? institutionsResponse.data
-          : []
-      );
+        setRoles(
+          Array.isArray(data)
+            ? data
+            : data?.roles ||
+                data?.data ||
+                []
+        );
+      } else {
+        /*
+         * This is intentionally NOT treated as a page error.
+         *
+         * For Principal / Director,
+         * NAAC Coordinator and Dept. Coordinator,
+         * /admin/roles is not required.
+         */
+        console.log(
+          "ROLE API NOT AVAILABLE FOR CURRENT USER:",
+          currentRole
+        );
 
-      setFaculties(
-        Array.isArray(facultiesResponse.data)
-          ? facultiesResponse.data
-          : []
-      );
+        setRoles([]);
+      }
 
-      setDepartments(
-        Array.isArray(departmentsResponse.data)
-          ? departmentsResponse.data
-          : []
-      );
+      // =========================
+      // INSTITUTIONS
+      // =========================
+
+      if (
+        institutionsResult.status ===
+        "fulfilled"
+      ) {
+        const data =
+          institutionsResult.value?.data;
+
+        console.log(
+          "INSTITUTIONS:",
+          data
+        );
+
+        setInstitutions(
+          Array.isArray(data)
+            ? data
+            : data?.institutions ||
+                data?.data ||
+                []
+        );
+      } else {
+        console.error(
+          "INSTITUTIONS LOAD ERROR:",
+          institutionsResult.reason
+        );
+
+        setInstitutions([]);
+      }
+
+      // =========================
+      // FACULTIES
+      // =========================
+
+      if (
+        facultiesResult.status === "fulfilled"
+      ) {
+        const data =
+          facultiesResult.value?.data;
+
+        console.log(
+          "FACULTIES:",
+          data
+        );
+
+        setFaculties(
+          Array.isArray(data)
+            ? data
+            : data?.faculties ||
+                data?.data ||
+                []
+        );
+      } else {
+        console.error(
+          "FACULTIES LOAD ERROR:",
+          facultiesResult.reason
+        );
+
+        setFaculties([]);
+      }
+
+      // =========================
+      // DEPARTMENTS
+      // =========================
+
+      if (
+        departmentsResult.status ===
+        "fulfilled"
+      ) {
+        const data =
+          departmentsResult.value?.data;
+
+        console.log(
+          "DEPARTMENTS:",
+          data
+        );
+
+        setDepartments(
+          Array.isArray(data)
+            ? data
+            : data?.departments ||
+                data?.data ||
+                []
+        );
+      } else {
+        console.error(
+          "DEPARTMENTS LOAD ERROR:",
+          departmentsResult.reason
+        );
+
+        setDepartments([]);
+      }
     } catch (err) {
-      console.error("LOAD REGISTRATION DATA ERROR:", err);
+      console.error(
+        "LOAD REGISTRATION DATA ERROR:",
+        err
+      );
 
       const message =
         err?.response?.data?.detail ||
@@ -180,23 +424,37 @@ const RegistrationRequests = () => {
   };
 
   useEffect(() => {
+    if (!currentRole) {
+      return;
+    }
+
+    if (!APPROVAL_ROLES.includes(currentRole)) {
+      return;
+    }
+
     loadData();
-  }, []);
+  }, [currentRole]);
 
   // =========================
   // COUNTS
   // =========================
 
   const pendingCount = requests.filter(
-    (request) => request.status === "PENDING"
+    (request) =>
+      String(request.status || "").toUpperCase() ===
+      "PENDING"
   ).length;
 
   const approvedCount = requests.filter(
-    (request) => request.status === "APPROVED"
+    (request) =>
+      String(request.status || "").toUpperCase() ===
+      "APPROVED"
   ).length;
 
   const rejectedCount = requests.filter(
-    (request) => request.status === "REJECTED"
+    (request) =>
+      String(request.status || "").toUpperCase() ===
+      "REJECTED"
   ).length;
 
   // =========================
@@ -205,23 +463,46 @@ const RegistrationRequests = () => {
 
   const filteredRequests = useMemo(() => {
     return requests.filter((request) => {
-      const search = searchTerm.toLowerCase().trim();
+      const search = searchTerm
+        .toLowerCase()
+        .trim();
 
       const matchesSearch =
         !search ||
-        request.full_name?.toLowerCase().includes(search) ||
-        request.email?.toLowerCase().includes(search) ||
-        request.institution?.toLowerCase().includes(search) ||
-        request.department?.toLowerCase().includes(search) ||
-        request.designation?.toLowerCase().includes(search);
+        String(
+          request.full_name || ""
+        )
+          .toLowerCase()
+          .includes(search) ||
+        String(request.email || "")
+          .toLowerCase()
+          .includes(search) ||
+        String(request.institution || "")
+          .toLowerCase()
+          .includes(search) ||
+        String(request.department || "")
+          .toLowerCase()
+          .includes(search) ||
+        String(request.designation || "")
+          .toLowerCase()
+          .includes(search);
 
       const matchesStatus =
         statusFilter === "ALL" ||
-        request.status === statusFilter;
+        String(
+          request.status || ""
+        ).toUpperCase() === statusFilter;
 
-      return matchesSearch && matchesStatus;
+      return (
+        matchesSearch &&
+        matchesStatus
+      );
     });
-  }, [requests, searchTerm, statusFilter]);
+  }, [
+    requests,
+    searchTerm,
+    statusFilter,
+  ]);
 
   // =========================
   // FACULTY FILTER
@@ -234,26 +515,35 @@ const RegistrationRequests = () => {
 
     return faculties.filter(
       (faculty) =>
-        Number(faculty.institution_id) ===
-        Number(selectedInstitution)
+        Number(
+          faculty.institution_id
+        ) === Number(selectedInstitution)
     );
-  }, [faculties, selectedInstitution]);
+  }, [
+    faculties,
+    selectedInstitution,
+  ]);
 
   // =========================
   // DEPARTMENT FILTER
   // =========================
 
   const filteredDepartments = useMemo(() => {
-    if (!selectedInstitution || !selectedFaculty) {
+    if (
+      !selectedInstitution ||
+      !selectedFaculty
+    ) {
       return [];
     }
 
     return departments.filter(
       (department) =>
-        Number(department.institution_id) ===
-          Number(selectedInstitution) &&
-        Number(department.faculty_id) ===
-          Number(selectedFaculty)
+        Number(
+          department.institution_id
+        ) === Number(selectedInstitution) &&
+        Number(
+          department.faculty_id
+        ) === Number(selectedFaculty)
     );
   }, [
     departments,
@@ -267,33 +557,141 @@ const RegistrationRequests = () => {
 
   const getRoleName = (roleId) => {
     const role = roles.find(
-      (item) => Number(item.id) === Number(roleId)
+      (item) =>
+        Number(item.id) ===
+        Number(roleId)
     );
 
     return role?.name || "";
   };
 
   // =========================
+  // GET REQUESTED ROLE ID
+  // =========================
+
+  const getRequestedRoleId = (
+    request
+  ) => {
+    return (
+      request?.requested_role_id ??
+      request?.role_id ??
+      null
+    );
+  };
+
+  // =========================
+  // GET REQUESTED ROLE NAME
+  // =========================
+
+  const getRequestedRoleName = (
+    request
+  ) => {
+    const roleId =
+      getRequestedRoleId(request);
+
+    if (roleId) {
+      const roleName =
+        getRoleName(roleId);
+
+      if (roleName) {
+        return roleName;
+      }
+    }
+
+    return (
+      request?.requested_role_name ||
+      request?.role_name ||
+      request?.requested_role ||
+      ""
+    );
+  };
+
+  // =========================
+  // AUTHORIZATION CHECK
+  // =========================
+
+  const canApproveRequest = (
+    request
+  ) => {
+    if (!request) {
+      return false;
+    }
+
+    if (
+      String(request.status || "").toUpperCase() !==
+      "PENDING"
+    ) {
+      return false;
+    }
+
+    if (
+      !APPROVAL_ROLES.includes(
+        currentRole
+      )
+    ) {
+      return false;
+    }
+
+    /*
+     * Admin can approve all pending requests.
+     */
+    if (currentRole === "Admin") {
+      return true;
+    }
+
+    /*
+     * For non-admin approval roles,
+     * the backend decides the actual authority.
+     *
+     * Frontend additionally checks the configured
+     * hierarchy where possible.
+     */
+    const requestedRole =
+      normalizeRole(
+        getRequestedRoleName(request)
+      );
+
+    const requiredApprover =
+      ROLE_AUTHORITY[
+        requestedRole
+      ];
+
+    return (
+      requiredApprover ===
+      currentRole
+    );
+  };
+
+  // =========================
   // OPEN VIEW MODAL
   // =========================
 
-  const handleView = async (request) => {
+  const handleView = async (
+    request
+  ) => {
     try {
       setError("");
 
-      const response = await api.get(
-        `/admin/registration-requests/${request.id}`
-      );
+      const response =
+        await api.get(
+          `/admin/registration-requests/${request.id}`
+        );
 
       console.log(
         "REGISTRATION REQUEST DETAILS:",
         response.data
       );
 
-      setSelectedRequest(response.data);
+      setSelectedRequest(
+        response.data
+      );
+
       setShowViewModal(true);
     } catch (err) {
-      console.error("VIEW REQUEST ERROR:", err);
+      console.error(
+        "VIEW REQUEST ERROR:",
+        err
+      );
 
       const message =
         err?.response?.data?.detail ||
@@ -307,13 +705,73 @@ const RegistrationRequests = () => {
   // OPEN APPROVE MODAL
   // =========================
 
-  const openApproveModal = (request) => {
+  const openApproveModal = (
+    request
+  ) => {
+    if (!canApproveRequest(request)) {
+      setError(
+        "You are not authorized to approve this registration request."
+      );
+      return;
+    }
+
     setSelectedRequest(request);
 
-    setSelectedRole("");
-    setSelectedInstitution("");
-    setSelectedFaculty("");
-    setSelectedDepartment("");
+    /*
+     * Admin:
+     * Role can be selected manually.
+     *
+     * Other approval roles:
+     * The requested role is automatically used.
+     */
+    if (currentRole === "Admin") {
+      setSelectedRole(
+        getRequestedRoleId(
+          request
+        )
+          ? String(
+              getRequestedRoleId(
+                request
+              )
+            )
+          : ""
+      );
+    } else {
+      const requestedRoleId =
+        getRequestedRoleId(
+          request
+        );
+
+      setSelectedRole(
+        requestedRoleId
+          ? String(requestedRoleId)
+          : ""
+      );
+    }
+
+    setSelectedInstitution(
+      request.institution_id
+        ? String(
+            request.institution_id
+          )
+        : ""
+    );
+
+    setSelectedFaculty(
+      request.faculty_id
+        ? String(
+            request.faculty_id
+          )
+        : ""
+    );
+
+    setSelectedDepartment(
+      request.department_id
+        ? String(
+            request.department_id
+          )
+        : ""
+    );
 
     setError("");
     setSuccess("");
@@ -325,12 +783,16 @@ const RegistrationRequests = () => {
   // INSTITUTION CHANGE
   // =========================
 
-  const handleInstitutionChange = (e) => {
-    const institutionId = e.target.value;
+  const handleInstitutionChange = (
+    e
+  ) => {
+    const institutionId =
+      e.target.value;
 
-    setSelectedInstitution(institutionId);
+    setSelectedInstitution(
+      institutionId
+    );
 
-    // Reset dependent selections
     setSelectedFaculty("");
     setSelectedDepartment("");
   };
@@ -339,12 +801,16 @@ const RegistrationRequests = () => {
   // FACULTY CHANGE
   // =========================
 
-  const handleFacultyChange = (e) => {
-    const facultyId = e.target.value;
+  const handleFacultyChange = (
+    e
+  ) => {
+    const facultyId =
+      e.target.value;
 
-    setSelectedFaculty(facultyId);
+    setSelectedFaculty(
+      facultyId
+    );
 
-    // Reset department
     setSelectedDepartment("");
   };
 
@@ -360,48 +826,102 @@ const RegistrationRequests = () => {
     setError("");
     setSuccess("");
 
-    // Role validation
+    if (
+      !canApproveRequest(
+        selectedRequest
+      )
+    ) {
+      setError(
+        "You are not authorized to approve this registration request."
+      );
+      return;
+    }
+
+    // =========================
+    // ROLE
+    // =========================
+
     if (!selectedRole) {
-      setError("Please select a role.");
+      setError(
+        "The requested role could not be determined."
+      );
       return;
     }
 
-    const selectedRoleName = getRoleName(selectedRole);
+    const selectedRoleName =
+      normalizeRole(
+        getRoleName(
+          selectedRole
+        ) ||
+          getRequestedRoleName(
+            selectedRequest
+          )
+      );
 
-    const normalizedRoleName = selectedRoleName
-      .toLowerCase()
-      .replace(/\s+/g, "");
+    /*
+     * Non-admin users cannot change
+     * the requested role.
+     */
+    if (currentRole !== "Admin") {
+      const requestedRoleName =
+        normalizeRole(
+          getRequestedRoleName(
+            selectedRequest
+          )
+        );
 
-    // Institution required for every non-admin role
-    if (
-      normalizedRoleName !== "admin" &&
-      !selectedInstitution
-    ) {
-      setError("Please select an institution.");
+      if (
+        requestedRoleName &&
+        selectedRoleName &&
+        requestedRoleName !==
+          selectedRoleName
+      ) {
+        setError(
+          "You cannot change the requested role."
+        );
+        return;
+      }
+    }
+
+    // =========================
+    // INSTITUTION
+    // =========================
+
+    if (!selectedInstitution) {
+      setError(
+        "Please select an institution."
+      );
       return;
     }
 
-    // Faculty required when institution is selected
-    if (
-      normalizedRoleName !== "admin" &&
-      !selectedFaculty
-    ) {
-      setError("Please select a faculty.");
+    // =========================
+    // FACULTY
+    // =========================
+
+    if (!selectedFaculty) {
+      setError(
+        "Please select a faculty."
+      );
       return;
     }
 
-    // Department required for Department Coordinator
-    // and Committee Member
+    // =========================
+    // DEPARTMENT
+    // =========================
+
     const departmentRequired =
-      normalizedRoleName === "dept.coordinator" ||
-      normalizedRoleName === "deptcoordinator" ||
-      normalizedRoleName === "committeemember";
+      selectedRoleName ===
+        "Dept. Coordinator" ||
+      selectedRoleName ===
+        "Committee Member";
 
     if (
       departmentRequired &&
       !selectedDepartment
     ) {
-      setError("Please select a department.");
+      setError(
+        "Please select a department."
+      );
       return;
     }
 
@@ -409,30 +929,55 @@ const RegistrationRequests = () => {
       setActionLoading(true);
 
       const approvalPayload = {
-        role_id: Number(selectedRole),
+        role_id: Number(
+          selectedRole
+        ),
 
-        institution_id: selectedInstitution
-          ? Number(selectedInstitution)
-          : null,
+        institution_id:
+          selectedInstitution
+            ? Number(
+                selectedInstitution
+              )
+            : null,
 
-        faculty_id: selectedFaculty
-          ? Number(selectedFaculty)
-          : null,
+        /*
+         * Backend derives the faculty
+         * from the selected department.
+         *
+         * We still send faculty_id for
+         * compatibility with the current
+         * approval schema.
+         */
+        faculty_id:
+          selectedFaculty
+            ? Number(
+                selectedFaculty
+              )
+            : null,
 
-        department_id: selectedDepartment
-          ? Number(selectedDepartment)
-          : null,
+        department_id:
+          selectedDepartment
+            ? Number(
+                selectedDepartment
+              )
+            : null,
       };
+
+      console.log(
+        "CURRENT ROLE:",
+        currentRole
+      );
 
       console.log(
         "APPROVAL PAYLOAD:",
         approvalPayload
       );
 
-      const response = await api.post(
-        `/admin/registration-requests/${selectedRequest.id}/approve`,
-        approvalPayload
-      );
+      const response =
+        await api.post(
+          `/admin/registration-requests/${selectedRequest.id}/approve`,
+          approvalPayload
+        );
 
       console.log(
         "APPROVAL RESPONSE:",
@@ -445,8 +990,8 @@ const RegistrationRequests = () => {
       );
 
       setShowApproveModal(false);
+      setSelectedRequest(null);
 
-      // Refresh request list
       await loadData(true);
     } catch (err) {
       console.error(
@@ -469,7 +1014,16 @@ const RegistrationRequests = () => {
   // OPEN REJECT MODAL
   // =========================
 
-  const openRejectModal = (request) => {
+  const openRejectModal = (
+    request
+  ) => {
+    if (!canApproveRequest(request)) {
+      setError(
+        "You are not authorized to reject this registration request."
+      );
+      return;
+    }
+
     setSelectedRequest(request);
     setRejectReason("");
     setError("");
@@ -486,8 +1040,21 @@ const RegistrationRequests = () => {
       return;
     }
 
+    if (
+      !canApproveRequest(
+        selectedRequest
+      )
+    ) {
+      setError(
+        "You are not authorized to reject this registration request."
+      );
+      return;
+    }
+
     if (!rejectReason.trim()) {
-      setError("Please provide a rejection reason.");
+      setError(
+        "Please provide a rejection reason."
+      );
       return;
     }
 
@@ -496,12 +1063,14 @@ const RegistrationRequests = () => {
       setError("");
       setSuccess("");
 
-      const response = await api.post(
-        `/admin/registration-requests/${selectedRequest.id}/reject`,
-        {
-          reason: rejectReason.trim(),
-        }
-      );
+      const response =
+        await api.post(
+          `/admin/registration-requests/${selectedRequest.id}/reject`,
+          {
+            reason:
+              rejectReason.trim(),
+          }
+        );
 
       console.log(
         "REJECTION RESPONSE:",
@@ -514,6 +1083,7 @@ const RegistrationRequests = () => {
       );
 
       setShowRejectModal(false);
+      setSelectedRequest(null);
 
       await loadData(true);
     } catch (err) {
@@ -543,7 +1113,9 @@ const RegistrationRequests = () => {
   };
 
   const closeApproveModal = () => {
-    if (actionLoading) return;
+    if (actionLoading) {
+      return;
+    }
 
     setShowApproveModal(false);
     setSelectedRequest(null);
@@ -555,7 +1127,9 @@ const RegistrationRequests = () => {
   };
 
   const closeRejectModal = () => {
-    if (actionLoading) return;
+    if (actionLoading) {
+      return;
+    }
 
     setShowRejectModal(false);
     setSelectedRequest(null);
@@ -566,50 +1140,78 @@ const RegistrationRequests = () => {
   // GET INSTITUTION NAME
   // =========================
 
-  const getInstitutionName = (institutionId) => {
-    const institution = institutions.find(
-      (item) =>
-        Number(item.id) === Number(institutionId)
-    );
+  const getInstitutionName = (
+    institutionId
+  ) => {
+    const institution =
+      institutions.find(
+        (item) =>
+          Number(item.id) ===
+          Number(institutionId)
+      );
 
-    return institution?.name || "Not assigned";
+    return (
+      institution?.name ||
+      "Not assigned"
+    );
   };
 
   // =========================
   // GET FACULTY NAME
   // =========================
 
-  const getFacultyName = (facultyId) => {
-    const faculty = faculties.find(
-      (item) =>
-        Number(item.id) === Number(facultyId)
-    );
+  const getFacultyName = (
+    facultyId
+  ) => {
+    const faculty =
+      faculties.find(
+        (item) =>
+          Number(item.id) ===
+          Number(facultyId)
+      );
 
-    return faculty?.name || "Not assigned";
+    return (
+      faculty?.name ||
+      "Not assigned"
+    );
   };
 
   // =========================
   // GET DEPARTMENT NAME
   // =========================
 
-  const getDepartmentName = (departmentId) => {
-    const department = departments.find(
-      (item) =>
-        Number(item.id) === Number(departmentId)
-    );
+  const getDepartmentName = (
+    departmentId
+  ) => {
+    const department =
+      departments.find(
+        (item) =>
+          Number(item.id) ===
+          Number(departmentId)
+      );
 
-    return department?.name || "Not assigned";
+    return (
+      department?.name ||
+      "Not assigned"
+    );
   };
 
   // =========================
   // STATUS BADGE
   // =========================
 
-  const renderStatus = (status) => {
+  const renderStatus = (
+    status
+  ) => {
     const normalizedStatus =
-      status?.toUpperCase();
+      String(
+        status || ""
+      ).toUpperCase();
 
-    if (normalizedStatus === "APPROVED") {
+    if (
+      normalizedStatus ===
+      "APPROVED"
+    ) {
       return (
         <span className="status-badge approved">
           <CheckCircle2 size={14} />
@@ -618,7 +1220,10 @@ const RegistrationRequests = () => {
       );
     }
 
-    if (normalizedStatus === "REJECTED") {
+    if (
+      normalizedStatus ===
+      "REJECTED"
+    ) {
       return (
         <span className="status-badge rejected">
           <XCircle size={14} />
@@ -636,10 +1241,30 @@ const RegistrationRequests = () => {
   };
 
   // =========================
+  // REQUESTED ROLE DISPLAY
+  // =========================
+
+  const renderRequestedRole = (
+    request
+  ) => {
+    const roleName =
+      getRequestedRoleName(
+        request
+      );
+
+    return (
+      roleName || "—"
+    );
+  };
+
+  // =========================
   // LOADING
   // =========================
 
-  if (loading) {
+  if (
+    loading ||
+    !currentRole
+  ) {
     return (
       <div className="registration-page">
         <div className="registration-loading">
@@ -647,7 +1272,10 @@ const RegistrationRequests = () => {
             size={32}
             className="spin"
           />
-          <p>Loading registration requests...</p>
+
+          <p>
+            Loading registration requests...
+          </p>
         </div>
       </div>
     );
@@ -668,27 +1296,42 @@ const RegistrationRequests = () => {
 
           <button
             className="back-button"
-            onClick={() =>
-              navigate("/admin/dashboard")
-            }
+            onClick={() => {
+              if (
+                currentRole ===
+                "Admin"
+              ) {
+                navigate(
+                  "/admin/users"
+                );
+              } else {
+                navigate(
+                  "/dashboard"
+                );
+              }
+            }}
           >
             <ArrowLeft size={18} />
           </button>
 
           <div>
             <div className="page-title-row">
-              <h1>Registration Requests</h1>
+
+              <h1>
+                Registration Requests
+              </h1>
 
               {pendingCount > 0 && (
                 <span className="pending-count">
                   {pendingCount} Pending
                 </span>
               )}
+
             </div>
 
             <p>
-              Review and manage new user registration
-              requests.
+              Review and authorize new
+              user registration requests.
             </p>
           </div>
 
@@ -696,32 +1339,69 @@ const RegistrationRequests = () => {
 
         <button
           className="refresh-button"
-          onClick={() => loadData(true)}
+          onClick={() =>
+            loadData(true)
+          }
           disabled={refreshing}
         >
           <RefreshCw
             size={17}
             className={
-              refreshing ? "spin" : ""
+              refreshing
+                ? "spin"
+                : ""
             }
           />
-          Refresh
+
+          {refreshing
+            ? "Refreshing..."
+            : "Refresh"}
         </button>
 
+      </div>
+
+      {/* AUTHORITY INFO */}
+
+      <div
+        className="alert-message"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+        }}
+      >
+        <ShieldCheck size={18} />
+
+        <span>
+          Logged in as{" "}
+          <strong>
+            {currentRole}
+          </strong>
+          {currentRole !==
+            "Admin" &&
+            " — only registration requests within your authorization level can be approved."}
+        </span>
       </div>
 
       {/* ERROR */}
 
       {error && (
         <div className="alert-message error">
+
           <AlertCircle size={18} />
-          <span>{error}</span>
+
+          <span>
+            {error}
+          </span>
 
           <button
-            onClick={() => setError("")}
+            onClick={() =>
+              setError("")
+            }
           >
             <X size={16} />
           </button>
+
         </div>
       )}
 
@@ -729,14 +1409,21 @@ const RegistrationRequests = () => {
 
       {success && (
         <div className="alert-message success">
+
           <CheckCircle2 size={18} />
-          <span>{success}</span>
+
+          <span>
+            {success}
+          </span>
 
           <button
-            onClick={() => setSuccess("")}
+            onClick={() =>
+              setSuccess("")
+            }
           >
             <X size={16} />
           </button>
+
         </div>
       )}
 
@@ -745,47 +1432,75 @@ const RegistrationRequests = () => {
       <div className="stats-grid">
 
         <div className="stat-card">
+
           <div className="stat-icon total">
             <Users size={22} />
           </div>
 
           <div>
-            <span>Total Requests</span>
-            <strong>{requests.length}</strong>
+            <span>
+              Total Requests
+            </span>
+
+            <strong>
+              {requests.length}
+            </strong>
           </div>
+
         </div>
 
         <div className="stat-card">
+
           <div className="stat-icon pending">
             <Clock size={22} />
           </div>
 
           <div>
-            <span>Pending</span>
-            <strong>{pendingCount}</strong>
+            <span>
+              Pending
+            </span>
+
+            <strong>
+              {pendingCount}
+            </strong>
           </div>
+
         </div>
 
         <div className="stat-card">
+
           <div className="stat-icon approved">
             <CheckCircle2 size={22} />
           </div>
 
           <div>
-            <span>Approved</span>
-            <strong>{approvedCount}</strong>
+            <span>
+              Approved
+            </span>
+
+            <strong>
+              {approvedCount}
+            </strong>
           </div>
+
         </div>
 
         <div className="stat-card">
+
           <div className="stat-icon rejected">
             <XCircle size={22} />
           </div>
 
           <div>
-            <span>Rejected</span>
-            <strong>{rejectedCount}</strong>
+            <span>
+              Rejected
+            </span>
+
+            <strong>
+              {rejectedCount}
+            </strong>
           </div>
+
         </div>
 
       </div>
@@ -795,6 +1510,7 @@ const RegistrationRequests = () => {
       <div className="filter-bar">
 
         <div className="search-box">
+
           <Search size={18} />
 
           <input
@@ -802,18 +1518,24 @@ const RegistrationRequests = () => {
             placeholder="Search by name, email, institution..."
             value={searchTerm}
             onChange={(e) =>
-              setSearchTerm(e.target.value)
+              setSearchTerm(
+                e.target.value
+              )
             }
           />
+
         </div>
 
         <select
           className="status-filter"
           value={statusFilter}
           onChange={(e) =>
-            setStatusFilter(e.target.value)
+            setStatusFilter(
+              e.target.value
+            )
           }
         >
+
           <option value="ALL">
             All Status
           </option>
@@ -829,6 +1551,7 @@ const RegistrationRequests = () => {
           <option value="REJECTED">
             Rejected
           </option>
+
         </select>
 
       </div>
@@ -838,20 +1561,29 @@ const RegistrationRequests = () => {
       <div className="table-card">
 
         <div className="table-header">
+
           <div>
-            <h2>Registration Requests</h2>
+            <h2>
+              Registration Requests
+            </h2>
+
             <p>
-              {filteredRequests.length} request
-              {filteredRequests.length !== 1
+              {filteredRequests.length}{" "}
+              request
+              {filteredRequests.length !==
+              1
                 ? "s"
                 : ""}{" "}
               found
             </p>
           </div>
+
         </div>
 
-        {filteredRequests.length === 0 ? (
+        {filteredRequests.length ===
+        0 ? (
           <div className="empty-state">
+
             <Users size={40} />
 
             <h3>
@@ -859,8 +1591,11 @@ const RegistrationRequests = () => {
             </h3>
 
             <p>
-              Try changing your search or filter.
+              There are no requests
+              available for your current
+              authorization level.
             </p>
+
           </div>
         ) : (
           <div className="table-wrapper">
@@ -868,143 +1603,212 @@ const RegistrationRequests = () => {
             <table>
 
               <thead>
+
                 <tr>
-                  <th>Applicant</th>
-                  <th>Institution</th>
-                  <th>Department</th>
-                  <th>Designation</th>
-                  <th>Status</th>
-                  <th>Submitted</th>
-                  <th>Actions</th>
+                  <th>
+                    Applicant
+                  </th>
+
+                  <th>
+                    Institution
+                  </th>
+
+                  <th>
+                    Department
+                  </th>
+
+                  <th>
+                    Requested Role
+                  </th>
+
+                  <th>
+                    Designation
+                  </th>
+
+                  <th>
+                    Status
+                  </th>
+
+                  <th>
+                    Submitted
+                  </th>
+
+                  <th>
+                    Actions
+                  </th>
                 </tr>
+
               </thead>
 
               <tbody>
 
                 {filteredRequests.map(
-                  (request) => (
-                    <tr key={request.id}>
+                  (request) => {
 
-                      <td>
-                        <div className="applicant-cell">
+                    const canAct =
+                      canApproveRequest(
+                        request
+                      );
 
-                          <div className="applicant-avatar">
-                            {request.full_name
-                              ?.charAt(0)
-                              ?.toUpperCase() || "U"}
+                    return (
+                      <tr
+                        key={
+                          request.id
+                        }
+                      >
+
+                        <td>
+
+                          <div className="applicant-cell">
+
+                            <div className="applicant-avatar">
+                              {request.full_name
+                                ?.charAt(
+                                  0
+                                )
+                                ?.toUpperCase() ||
+                                "U"}
+                            </div>
+
+                            <div>
+
+                              <strong>
+                                {
+                                  request.full_name
+                                }
+                              </strong>
+
+                              <span>
+                                {
+                                  request.email
+                                }
+                              </span>
+
+                            </div>
+
                           </div>
 
-                          <div>
-                            <strong>
-                              {request.full_name}
-                            </strong>
+                        </td>
+
+                        <td>
+
+                          <div className="table-info">
+
+                            <Building2
+                              size={15}
+                            />
 
                             <span>
-                              {request.email}
+                              {request.institution ||
+                                getInstitutionName(
+                                  request.institution_id
+                                ) ||
+                                "—"}
                             </span>
+
                           </div>
 
-                        </div>
-                      </td>
+                        </td>
 
-                      <td>
-                        <div className="table-info">
-                          <Building2 size={15} />
-                          <span>
-                            {request.institution ||
-                              getInstitutionName(
-                                request.institution_id
-                              ) ||
-                              "—"}
-                          </span>
-                        </div>
-                      </td>
+                        <td>
+                          {request.department ||
+                            getDepartmentName(
+                              request.department_id
+                            ) ||
+                            "—"}
+                        </td>
 
-                      <td>
-                        {request.department ||
-                          getDepartmentName(
-                            request.department_id
-                          ) ||
-                          "—"}
-                      </td>
+                        <td>
+                          <strong>
+                            {renderRequestedRole(
+                              request
+                            )}
+                          </strong>
+                        </td>
 
-                      <td>
-                        {request.designation ||
-                          "—"}
-                      </td>
+                        <td>
+                          {request.designation ||
+                            "—"}
+                        </td>
 
-                      <td>
-                        {renderStatus(
-                          request.status
-                        )}
-                      </td>
-
-                      <td>
-                        {request.created_at
-                          ? new Date(
-                              request.created_at
-                            ).toLocaleDateString(
-                              "en-IN",
-                              {
-                                day: "2-digit",
-                                month: "short",
-                                year: "numeric",
-                              }
-                            )
-                          : "—"}
-                      </td>
-
-                      <td>
-
-                        <div className="action-buttons">
-
-                          <button
-                            className="icon-action view"
-                            title="View"
-                            onClick={() =>
-                              handleView(request)
-                            }
-                          >
-                            <Eye size={16} />
-                          </button>
-
-                          {request.status ===
-                            "PENDING" && (
-                            <>
-                              <button
-                                className="icon-action approve"
-                                title="Approve"
-                                onClick={() =>
-                                  openApproveModal(
-                                    request
-                                  )
-                                }
-                              >
-                                <CheckCircle2
-                                  size={16}
-                                />
-                              </button>
-
-                              <button
-                                className="icon-action reject"
-                                title="Reject"
-                                onClick={() =>
-                                  openRejectModal(
-                                    request
-                                  )
-                                }
-                              >
-                                <XCircle size={16} />
-                              </button>
-                            </>
+                        <td>
+                          {renderStatus(
+                            request.status
                           )}
+                        </td>
 
-                        </div>
+                        <td>
+                          {request.created_at
+                            ? new Date(
+                                request.created_at
+                              ).toLocaleDateString(
+                                "en-IN",
+                                {
+                                  day: "2-digit",
+                                  month: "short",
+                                  year: "numeric",
+                                }
+                              )
+                            : "—"}
+                        </td>
 
-                      </td>
+                        <td>
 
-                    </tr>
-                  )
+                          <div className="action-buttons">
+
+                            <button
+                              className="icon-action view"
+                              title="View"
+                              onClick={() =>
+                                handleView(
+                                  request
+                                )
+                              }
+                            >
+                              <Eye
+                                size={16}
+                              />
+                            </button>
+
+                            {canAct && (
+                              <>
+                                <button
+                                  className="icon-action approve"
+                                  title="Approve"
+                                  onClick={() =>
+                                    openApproveModal(
+                                      request
+                                    )
+                                  }
+                                >
+                                  <CheckCircle2
+                                    size={16}
+                                  />
+                                </button>
+
+                                <button
+                                  className="icon-action reject"
+                                  title="Reject"
+                                  onClick={() =>
+                                    openRejectModal(
+                                      request
+                                    )
+                                  }
+                                >
+                                  <XCircle
+                                    size={16}
+                                  />
+                                </button>
+                              </>
+                            )}
+
+                          </div>
+
+                        </td>
+
+                      </tr>
+                    );
+                  }
                 )}
 
               </tbody>
@@ -1024,7 +1828,9 @@ const RegistrationRequests = () => {
         selectedRequest && (
           <div
             className="modal-overlay"
-            onClick={closeViewModal}
+            onClick={
+              closeViewModal
+            }
           >
 
             <div
@@ -1037,19 +1843,25 @@ const RegistrationRequests = () => {
               <div className="modal-header">
 
                 <div>
+
                   <h2>
                     Registration Details
                   </h2>
 
                   <p>
                     Request #
-                    {selectedRequest.id}
+                    {
+                      selectedRequest.id
+                    }
                   </p>
+
                 </div>
 
                 <button
                   className="modal-close"
-                  onClick={closeViewModal}
+                  onClick={
+                    closeViewModal
+                  }
                 >
                   <X size={20} />
                 </button>
@@ -1059,88 +1871,160 @@ const RegistrationRequests = () => {
               <div className="details-grid">
 
                 <div className="detail-item">
-                  <span>Full Name</span>
+
+                  <span>
+                    Full Name
+                  </span>
+
                   <strong>
-                    {selectedRequest.full_name ||
-                      "—"}
+                    {
+                      selectedRequest.full_name ||
+                      "—"
+                    }
                   </strong>
+
                 </div>
 
                 <div className="detail-item">
-                  <span>Email</span>
+
+                  <span>
+                    Email
+                  </span>
+
                   <strong>
-                    {selectedRequest.email ||
-                      "—"}
+                    {
+                      selectedRequest.email ||
+                      "—"
+                    }
                   </strong>
+
                 </div>
 
                 <div className="detail-item">
-                  <span>Institution</span>
+
+                  <span>
+                    Institution
+                  </span>
+
                   <strong>
-                    {selectedRequest.institution ||
+                    {
+                      selectedRequest.institution ||
                       getInstitutionName(
                         selectedRequest.institution_id
                       ) ||
-                      "—"}
+                      "—"
+                    }
                   </strong>
+
                 </div>
 
                 <div className="detail-item">
-                  <span>Faculty</span>
+
+                  <span>
+                    Faculty
+                  </span>
+
                   <strong>
-                    {selectedRequest.faculty ||
+                    {
+                      selectedRequest.faculty ||
                       getFacultyName(
                         selectedRequest.faculty_id
                       ) ||
-                      "Not assigned"}
+                      "Not assigned"
+                    }
                   </strong>
+
                 </div>
 
                 <div className="detail-item">
-                  <span>Department</span>
+
+                  <span>
+                    Department
+                  </span>
+
                   <strong>
-                    {selectedRequest.department ||
+                    {
+                      selectedRequest.department ||
                       getDepartmentName(
                         selectedRequest.department_id
                       ) ||
-                      "—"}
+                      "—"
+                    }
                   </strong>
+
                 </div>
 
                 <div className="detail-item">
-                  <span>Designation</span>
+
+                  <span>
+                    Requested Role
+                  </span>
+
                   <strong>
-                    {selectedRequest.designation ||
-                      "—"}
+                    {
+                      getRequestedRoleName(
+                        selectedRequest
+                      ) ||
+                      "—"
+                    }
                   </strong>
+
                 </div>
 
                 <div className="detail-item">
-                  <span>Status</span>
+
+                  <span>
+                    Designation
+                  </span>
+
+                  <strong>
+                    {
+                      selectedRequest.designation ||
+                      "—"
+                    }
+                  </strong>
+
+                </div>
+
+                <div className="detail-item">
+
+                  <span>
+                    Status
+                  </span>
+
                   <div>
                     {renderStatus(
                       selectedRequest.status
                     )}
                   </div>
+
                 </div>
 
                 <div className="detail-item">
-                  <span>Submitted On</span>
+
+                  <span>
+                    Submitted On
+                  </span>
+
                   <strong>
-                    {selectedRequest.created_at
-                      ? new Date(
-                          selectedRequest.created_at
-                        ).toLocaleString(
-                          "en-IN"
-                        )
-                      : "—"}
+                    {
+                      selectedRequest.created_at
+                        ? new Date(
+                            selectedRequest.created_at
+                          ).toLocaleString(
+                            "en-IN"
+                          )
+                        : "—"
+                    }
                   </strong>
+
                 </div>
 
               </div>
 
               {selectedRequest.rejection_reason && (
                 <div className="rejection-info">
+
                   <strong>
                     Rejection Reason
                   </strong>
@@ -1150,6 +2034,7 @@ const RegistrationRequests = () => {
                       selectedRequest.rejection_reason
                     }
                   </p>
+
                 </div>
               )}
 
@@ -1157,24 +2042,31 @@ const RegistrationRequests = () => {
 
                 <button
                   className="secondary-button"
-                  onClick={closeViewModal}
+                  onClick={
+                    closeViewModal
+                  }
                 >
                   Close
                 </button>
 
-                {selectedRequest.status ===
-                  "PENDING" && (
+                {canApproveRequest(
+                  selectedRequest
+                ) && (
                   <>
                     <button
                       className="danger-button"
                       onClick={() => {
                         closeViewModal();
+
                         openRejectModal(
                           selectedRequest
                         );
                       }}
                     >
-                      <XCircle size={17} />
+                      <XCircle
+                        size={17}
+                      />
+
                       Reject
                     </button>
 
@@ -1182,12 +2074,16 @@ const RegistrationRequests = () => {
                       className="primary-button"
                       onClick={() => {
                         closeViewModal();
+
                         openApproveModal(
                           selectedRequest
                         );
                       }}
                     >
-                      <CheckCircle2 size={17} />
+                      <CheckCircle2
+                        size={17}
+                      />
+
                       Approve
                     </button>
                   </>
@@ -1208,7 +2104,9 @@ const RegistrationRequests = () => {
         selectedRequest && (
           <div
             className="modal-overlay"
-            onClick={closeApproveModal}
+            onClick={
+              closeApproveModal
+            }
           >
 
             <div
@@ -1221,20 +2119,28 @@ const RegistrationRequests = () => {
               <div className="modal-header">
 
                 <div>
+
                   <h2>
                     Approve Registration
                   </h2>
 
                   <p>
-                    Assign role and organizational
-                    access.
+                    {currentRole ===
+                    "Admin"
+                      ? "Assign role and organizational access."
+                      : `Authorize this registration as ${currentRole}.`}
                   </p>
+
                 </div>
 
                 <button
                   className="modal-close"
-                  onClick={closeApproveModal}
-                  disabled={actionLoading}
+                  onClick={
+                    closeApproveModal
+                  }
+                  disabled={
+                    actionLoading
+                  }
                 >
                   <X size={20} />
                 </button>
@@ -1244,64 +2150,130 @@ const RegistrationRequests = () => {
               <div className="approval-applicant">
 
                 <div className="applicant-avatar large">
+
                   {selectedRequest.full_name
                     ?.charAt(0)
-                    ?.toUpperCase() || "U"}
+                    ?.toUpperCase() ||
+                    "U"}
+
                 </div>
 
                 <div>
+
                   <strong>
-                    {selectedRequest.full_name}
+                    {
+                      selectedRequest.full_name
+                    }
                   </strong>
 
                   <span>
-                    {selectedRequest.email}
+                    {
+                      selectedRequest.email
+                    }
                   </span>
+
                 </div>
 
               </div>
 
               <div className="approval-form">
 
-                {/* ROLE */}
+                {/* =========================
+                    ROLE
+                    ========================= */}
 
                 <div className="form-group">
 
                   <label>
-                    Role <span>*</span>
+                    Role{" "}
+                    <span>*</span>
                   </label>
 
-                  <select
-                    value={selectedRole}
-                    onChange={(e) =>
-                      setSelectedRole(
-                        e.target.value
-                      )
-                    }
-                    disabled={actionLoading}
-                  >
-                    <option value="">
-                      Select role
-                    </option>
+                  {currentRole ===
+                  "Admin" ? (
+                    <select
+                      value={
+                        selectedRole
+                      }
+                      onChange={(e) =>
+                        setSelectedRole(
+                          e.target.value
+                        )
+                      }
+                      disabled={
+                        actionLoading
+                      }
+                    >
 
-                    {roles.map((role) => (
-                      <option
-                        key={role.id}
-                        value={role.id}
-                      >
-                        {role.name}
+                      <option value="">
+                        Select role
                       </option>
-                    ))}
-                  </select>
+
+                      {roles.map(
+                        (role) => (
+                          <option
+                            key={
+                              role.id
+                            }
+                            value={
+                              role.id
+                            }
+                          >
+                            {
+                              role.name
+                            }
+                          </option>
+                        )
+                      )}
+
+                    </select>
+                  ) : (
+                    <>
+                      <select
+                        value={
+                          selectedRole
+                        }
+                        disabled
+                      >
+                        <option value="">
+                          {getRequestedRoleName(
+                            selectedRequest
+                          ) ||
+                            "Requested role"}
+                        </option>
+                      </select>
+
+                      <small
+                        style={{
+                          display:
+                            "block",
+                          marginTop:
+                            "6px",
+                          opacity:
+                            0.7,
+                        }}
+                      >
+                        The requested role
+                        cannot be changed
+                        by{" "}
+                        {
+                          currentRole
+                        }.
+                      </small>
+                    </>
+                  )}
 
                 </div>
 
-                {/* INSTITUTION */}
+                {/* =========================
+                    INSTITUTION
+                    ========================= */}
 
                 <div className="form-group">
 
                   <label>
-                    Institution <span>*</span>
+                    Institution{" "}
+                    <span>*</span>
                   </label>
 
                   <select
@@ -1311,19 +2283,30 @@ const RegistrationRequests = () => {
                     onChange={
                       handleInstitutionChange
                     }
-                    disabled={actionLoading}
+                    disabled={
+                      actionLoading
+                    }
                   >
+
                     <option value="">
                       Select institution
                     </option>
 
                     {institutions.map(
-                      (institution) => (
+                      (
+                        institution
+                      ) => (
                         <option
-                          key={institution.id}
-                          value={institution.id}
+                          key={
+                            institution.id
+                          }
+                          value={
+                            institution.id
+                          }
                         >
-                          {institution.name}
+                          {
+                            institution.name
+                          }
                         </option>
                       )
                     )}
@@ -1332,16 +2315,21 @@ const RegistrationRequests = () => {
 
                 </div>
 
-                {/* FACULTY */}
+                {/* =========================
+                    FACULTY
+                    ========================= */}
 
                 <div className="form-group">
 
                   <label>
-                    Faculty <span>*</span>
+                    Faculty{" "}
+                    <span>*</span>
                   </label>
 
                   <select
-                    value={selectedFaculty}
+                    value={
+                      selectedFaculty
+                    }
                     onChange={
                       handleFacultyChange
                     }
@@ -1361,12 +2349,20 @@ const RegistrationRequests = () => {
                     </option>
 
                     {filteredFaculties.map(
-                      (faculty) => (
+                      (
+                        faculty
+                      ) => (
                         <option
-                          key={faculty.id}
-                          value={faculty.id}
+                          key={
+                            faculty.id
+                          }
+                          value={
+                            faculty.id
+                          }
                         >
-                          {faculty.name}
+                          {
+                            faculty.name
+                          }
                         </option>
                       )
                     )}
@@ -1375,33 +2371,44 @@ const RegistrationRequests = () => {
 
                 </div>
 
-                {/* DEPARTMENT */}
+                {/* =========================
+                    DEPARTMENT
+                    ========================= */}
 
                 <div className="form-group">
 
                   <label>
                     Department
+
                     <span>
                       {selectedRole &&
                       (
                         getRoleName(
                           selectedRole
+                        ) ||
+                        getRequestedRoleName(
+                          selectedRequest
                         )
-                          .toLowerCase()
-                          .replace(/\s+/g, "") ===
-                          "dept.coordinator" ||
-                        getRoleName(
-                          selectedRole
-                        )
-                          .toLowerCase()
-                          .replace(/\s+/g, "") ===
-                          "deptcoordinator" ||
-                        getRoleName(
-                          selectedRole
-                        )
-                          .toLowerCase()
-                          .replace(/\s+/g, "") ===
-                          "committeemember"
+                      ) &&
+                      (
+                        normalizeRole(
+                          getRoleName(
+                            selectedRole
+                          ) ||
+                            getRequestedRoleName(
+                              selectedRequest
+                            )
+                        ) ===
+                          "Dept. Coordinator" ||
+                        normalizeRole(
+                          getRoleName(
+                            selectedRole
+                          ) ||
+                            getRequestedRoleName(
+                              selectedRequest
+                            )
+                        ) ===
+                          "Committee Member"
                       )
                         ? " *"
                         : ""}
@@ -1433,12 +2440,20 @@ const RegistrationRequests = () => {
                     </option>
 
                     {filteredDepartments.map(
-                      (department) => (
+                      (
+                        department
+                      ) => (
                         <option
-                          key={department.id}
-                          value={department.id}
+                          key={
+                            department.id
+                          }
+                          value={
+                            department.id
+                          }
                         >
-                          {department.name}
+                          {
+                            department.name
+                          }
                         </option>
                       )
                     )}
@@ -1450,44 +2465,63 @@ const RegistrationRequests = () => {
               </div>
 
               <div className="approval-info">
-                <UserCheck size={17} />
+
+                <UserCheck
+                  size={17}
+                />
 
                 <span>
-                  The selected role and organizational
-                  assignment will be applied when this
-                  registration is approved.
+                  {currentRole ===
+                  "Admin"
+                    ? "Admin can assign the final role and organizational access."
+                    : `Your approval authorizes the requested role. Final role assignment cannot be changed by ${currentRole}.`}
                 </span>
+
               </div>
 
               <div className="modal-footer">
 
                 <button
                   className="secondary-button"
-                  onClick={closeApproveModal}
-                  disabled={actionLoading}
+                  onClick={
+                    closeApproveModal
+                  }
+                  disabled={
+                    actionLoading
+                  }
                 >
                   Cancel
                 </button>
 
                 <button
                   className="primary-button"
-                  onClick={handleApprove}
-                  disabled={actionLoading}
+                  onClick={
+                    handleApprove
+                  }
+                  disabled={
+                    actionLoading
+                  }
                 >
+
                   {actionLoading ? (
                     <>
                       <RefreshCw
                         size={17}
                         className="spin"
                       />
+
                       Approving...
                     </>
                   ) : (
                     <>
-                      <CheckCircle2 size={17} />
+                      <CheckCircle2
+                        size={17}
+                      />
+
                       Approve Registration
                     </>
                   )}
+
                 </button>
 
               </div>
@@ -1505,7 +2539,9 @@ const RegistrationRequests = () => {
         selectedRequest && (
           <div
             className="modal-overlay"
-            onClick={closeRejectModal}
+            onClick={
+              closeRejectModal
+            }
           >
 
             <div
@@ -1518,20 +2554,26 @@ const RegistrationRequests = () => {
               <div className="modal-header">
 
                 <div>
+
                   <h2>
                     Reject Registration
                   </h2>
 
                   <p>
-                    Please provide a reason for
-                    rejection.
+                    Please provide a reason
+                    for rejection.
                   </p>
+
                 </div>
 
                 <button
                   className="modal-close"
-                  onClick={closeRejectModal}
-                  disabled={actionLoading}
+                  onClick={
+                    closeRejectModal
+                  }
+                  disabled={
+                    actionLoading
+                  }
                 >
                   <X size={20} />
                 </button>
@@ -1541,19 +2583,28 @@ const RegistrationRequests = () => {
               <div className="reject-applicant">
 
                 <div className="applicant-avatar large">
+
                   {selectedRequest.full_name
                     ?.charAt(0)
-                    ?.toUpperCase() || "U"}
+                    ?.toUpperCase() ||
+                    "U"}
+
                 </div>
 
                 <div>
+
                   <strong>
-                    {selectedRequest.full_name}
+                    {
+                      selectedRequest.full_name
+                    }
                   </strong>
 
                   <span>
-                    {selectedRequest.email}
+                    {
+                      selectedRequest.email
+                    }
                   </span>
+
                 </div>
 
               </div>
@@ -1561,19 +2612,24 @@ const RegistrationRequests = () => {
               <div className="form-group">
 
                 <label>
-                  Rejection Reason <span>*</span>
+                  Rejection Reason{" "}
+                  <span>*</span>
                 </label>
 
                 <textarea
                   rows="5"
-                  value={rejectReason}
+                  value={
+                    rejectReason
+                  }
                   onChange={(e) =>
                     setRejectReason(
                       e.target.value
                     )
                   }
                   placeholder="Enter the reason for rejecting this registration request..."
-                  disabled={actionLoading}
+                  disabled={
+                    actionLoading
+                  }
                 />
 
               </div>
@@ -1582,31 +2638,45 @@ const RegistrationRequests = () => {
 
                 <button
                   className="secondary-button"
-                  onClick={closeRejectModal}
-                  disabled={actionLoading}
+                  onClick={
+                    closeRejectModal
+                  }
+                  disabled={
+                    actionLoading
+                  }
                 >
                   Cancel
                 </button>
 
                 <button
                   className="danger-button"
-                  onClick={handleReject}
-                  disabled={actionLoading}
+                  onClick={
+                    handleReject
+                  }
+                  disabled={
+                    actionLoading
+                  }
                 >
+
                   {actionLoading ? (
                     <>
                       <RefreshCw
                         size={17}
                         className="spin"
                       />
+
                       Rejecting...
                     </>
                   ) : (
                     <>
-                      <XCircle size={17} />
+                      <XCircle
+                        size={17}
+                      />
+
                       Reject Registration
                     </>
                   )}
+
                 </button>
 
               </div>

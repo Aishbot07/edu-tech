@@ -13,6 +13,8 @@ from app.models.review import Review
 from app.models.notification import Notification
 from app.models.registration_request import RegistrationRequest
 from app.models.faculty import Faculty
+from app.models.institution_request import InstitutionRequest
+
 
 __all__ = [
     "User",
@@ -28,5 +30,7 @@ __all__ = [
     "Document",
     "Review",
     "Notification",
-   " RegistrationRequest",
+    "RegistrationRequest",
+    "Faculty",
+    "InstitutionRequest",
 ]

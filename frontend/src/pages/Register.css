@@ -37,9 +37,6 @@
   color: white;
 }
 
-
-/* Background grid */
-
 .register-brand-section::before {
   content: "";
   position: absolute;
@@ -57,12 +54,8 @@
     );
 
   background-size: 42px 42px;
-
   pointer-events: none;
 }
-
-
-/* Decorative glow */
 
 .register-brand-section::after {
   content: "";
@@ -79,7 +72,6 @@
   background: rgba(99, 102, 241, 0.13);
 
   filter: blur(10px);
-
   pointer-events: none;
 }
 
@@ -103,7 +95,6 @@
   align-items: center;
   gap: 13px;
 }
-
 
 .register-logo-icon {
   width: 45px;
@@ -129,7 +120,6 @@
     0 8px 25px rgba(79, 70, 229, 0.35);
 }
 
-
 .register-logo h2 {
   margin: 0;
 
@@ -138,7 +128,6 @@
 
   letter-spacing: -0.5px;
 }
-
 
 .register-logo span {
   display: block;
@@ -167,7 +156,6 @@
   max-width: 600px;
 }
 
-
 .register-badge {
   display: inline-flex;
   align-items: center;
@@ -188,7 +176,6 @@
 
   color: #b8c4df;
 }
-
 
 .badge-dot {
   width: 7px;
@@ -219,7 +206,6 @@
   color: #ffffff;
 }
 
-
 .register-brand-main h1 span {
   background:
     linear-gradient(
@@ -231,7 +217,6 @@
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
-
 
 .register-brand-main > p {
   max-width: 510px;
@@ -259,14 +244,12 @@
   gap: 18px;
 }
 
-
 .register-feature {
   display: flex;
   align-items: flex-start;
 
   gap: 13px;
 }
-
 
 .feature-icon {
   width: 25px;
@@ -288,7 +271,6 @@
   font-weight: 700;
 }
 
-
 .register-feature strong {
   display: block;
 
@@ -296,7 +278,6 @@
 
   color: #e8edf8;
 }
-
 
 .register-feature p {
   margin: 3px 0 0;
@@ -336,7 +317,6 @@
   backdrop-filter: blur(10px);
 }
 
-
 .info-number {
   font-size: 25px;
 
@@ -344,7 +324,6 @@
 
   color: #818cf8;
 }
-
 
 .register-info-card span {
   display: block;
@@ -358,7 +337,6 @@
   color: #7f8cab;
 }
 
-
 .register-info-card strong {
   display: block;
 
@@ -368,7 +346,6 @@
 
   color: #ffffff;
 }
-
 
 .register-info-card p {
   margin: 6px 0 0;
@@ -447,7 +424,6 @@
   margin-bottom: 27px;
 }
 
-
 .form-step {
   display: inline-block;
 
@@ -466,7 +442,6 @@
   letter-spacing: 1px;
 }
 
-
 .register-card-header h1 {
   margin: 14px 0 7px;
 
@@ -478,7 +453,6 @@
 
   letter-spacing: -0.8px;
 }
-
 
 .register-card-header p {
   margin: 0;
@@ -507,7 +481,6 @@
   line-height: 1.5;
 }
 
-
 .register-alert.error {
   border: 1px solid #fecaca;
 
@@ -515,7 +488,6 @@
 
   color: #b91c1c;
 }
-
 
 .register-alert.success {
   border: 1px solid #bbf7d0;
@@ -541,7 +513,6 @@
 
   letter-spacing: 0.1px;
 }
-
 
 .institution-title {
   margin-top: 25px;
@@ -573,7 +544,6 @@
   margin-bottom: 17px;
 }
 
-
 .form-group label {
   display: block;
 
@@ -585,7 +555,6 @@
 
   font-weight: 700;
 }
-
 
 .form-group label span {
   color: #ef4444;
@@ -625,18 +594,15 @@
     background 0.2s;
 }
 
-
 .form-group input::placeholder {
   color: #a3a9b7;
 }
-
 
 .form-group input:hover {
   border-color: #cbd5e1;
 
   background: #ffffff;
 }
-
 
 .form-group input:focus {
   border-color: #6366f1;
@@ -646,7 +612,6 @@
   box-shadow:
     0 0 0 3px rgba(99, 102, 241, 0.08);
 }
-
 
 .form-group input:disabled {
   cursor: not-allowed;
@@ -718,13 +683,11 @@
     background-color 0.2s;
 }
 
-
 .form-group select:hover {
   border-color: #cbd5e1;
 
   background-color: #ffffff;
 }
-
 
 .form-group select:focus {
   border-color: #6366f1;
@@ -735,7 +698,6 @@
     0 0 0 3px rgba(99, 102, 241, 0.08);
 }
 
-
 .form-group select:disabled {
   cursor: not-allowed;
 
@@ -744,11 +706,61 @@
   background-color: #f1f5f9;
 }
 
-
 .form-group select option {
   color: #111827;
 
   background: #ffffff;
+}
+
+
+/* =========================================================
+   REQUEST NEW INSTITUTION
+========================================================= */
+
+.request-institution-link {
+  display: inline-flex;
+
+  align-items: center;
+
+  margin: -3px 0 18px;
+
+  padding: 0;
+
+  border: none;
+
+  background: transparent;
+
+  color: #4f46e5;
+
+  font-family: inherit;
+
+  font-size: 11px;
+
+  font-weight: 700;
+
+  line-height: 1.5;
+
+  cursor: pointer;
+
+  text-decoration: none;
+
+  transition:
+    color 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.request-institution-link:hover {
+  color: #3730a3;
+
+  text-decoration: underline;
+}
+
+.request-institution-link:focus {
+  outline: none;
+
+  color: #3730a3;
+
+  text-decoration: underline;
 }
 
 
@@ -766,7 +778,6 @@
   margin: 9px 0 22px;
 }
 
-
 .register-checkbox input {
   width: 15px;
 
@@ -780,7 +791,6 @@
 
   cursor: pointer;
 }
-
 
 .register-checkbox label {
   color: #6b7280;
@@ -832,7 +842,6 @@
     opacity 0.2s;
 }
 
-
 .register-submit:hover {
   transform: translateY(-1px);
 
@@ -840,11 +849,9 @@
     0 10px 22px rgba(79, 70, 229, 0.28);
 }
 
-
 .register-submit:active {
   transform: translateY(0);
 }
-
 
 .register-submit:disabled {
   opacity: 0.75;
@@ -872,7 +879,6 @@
   color: #7b8497;
 }
 
-
 .register-login-link a {
   color: #4f46e5;
 
@@ -880,7 +886,6 @@
 
   text-decoration: none;
 }
-
 
 .register-login-link a:hover {
   text-decoration: underline;
@@ -905,11 +910,9 @@
   border-top: 1px solid #edf0f5;
 }
 
-
 .pending-note span {
   font-size: 13px;
 }
-
 
 .pending-note p {
   margin: 0;
@@ -946,7 +949,6 @@
   color: #166534;
 }
 
-
 .success-icon {
   width: 42px;
 
@@ -971,11 +973,9 @@
   font-weight: 700;
 }
 
-
 .success-content {
   flex: 1;
 }
-
 
 .success-content h3 {
   margin: 0 0 6px;
@@ -986,7 +986,6 @@
 
   color: #166534;
 }
-
 
 .success-content p {
   margin: 0;
@@ -1011,7 +1010,6 @@
   margin-top: 16px;
 }
 
-
 .success-detail-item {
   flex: 1;
 
@@ -1023,7 +1021,6 @@
 
   background: #ffffff;
 }
-
 
 .success-detail-item span {
   display: block;
@@ -1039,13 +1036,11 @@
   letter-spacing: 0.5px;
 }
 
-
 .success-detail-item strong {
   font-size: 15px;
 
   color: #166534;
 }
-
 
 .success-detail-item .pending-status {
   color: #b45309;
@@ -1091,7 +1086,6 @@
   background: #ffffff;
 }
 
-
 .next-step-title {
   margin-bottom: 16px;
 
@@ -1102,7 +1096,6 @@
   font-weight: 700;
 }
 
-
 .registration-steps {
   display: flex;
 
@@ -1110,7 +1103,6 @@
 
   gap: 14px;
 }
-
 
 .registration-step {
   position: relative;
@@ -1121,7 +1113,6 @@
 
   gap: 12px;
 }
-
 
 .step-circle {
   width: 32px;
@@ -1147,20 +1138,17 @@
   font-weight: 700;
 }
 
-
 .registration-step.completed .step-circle {
   background: #16a34a;
 
   color: #ffffff;
 }
 
-
 .registration-step.active .step-circle {
   background: #2563eb;
 
   color: #ffffff;
 }
-
 
 .registration-step strong {
   display: block;
@@ -1169,7 +1157,6 @@
 
   font-size: 13px;
 }
-
 
 .registration-step span {
   display: block;

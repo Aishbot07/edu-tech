@@ -16,9 +16,9 @@ import {
 import api from "../services/api";
 import { useAuth } from "../context/AuthContext";
 
-
 function Login() {
   const navigate = useNavigate();
+
   const { syncAuthFromStorage } = useAuth();
 
   // =========================================================
@@ -58,6 +58,44 @@ function Login() {
   ];
 
   // =========================================================
+  // ROLE NORMALIZATION
+  // =========================================================
+
+  const normalizeRole = (role) => {
+    if (!role) {
+      return "";
+    }
+
+    const clean = role
+      .trim()
+      .toLowerCase()
+      .replace(/[./_\-\s]/g, "");
+
+    if (
+      clean === "departmentcoordinator" ||
+      clean === "deptcoordinator"
+    ) {
+      return "deptcoordinator";
+    }
+
+    if (
+      clean === "principaldirector" ||
+      clean === "principal"
+    ) {
+      return "principaldirector";
+    }
+
+    if (
+      clean === "naaccoordinator" ||
+      clean === "coordinator"
+    ) {
+      return "naaccoordinator";
+    }
+
+    return clean;
+  };
+
+  // =========================================================
   // LOGIN
   // =========================================================
 
@@ -89,8 +127,8 @@ function Login() {
     setLoading(true);
 
     // ---------------------------------------------------------
-    // Login information for development
-    // Do NOT log the password.
+    // Development log
+    // Never log the password.
     // ---------------------------------------------------------
 
     console.log("Login attempt:", {
@@ -99,9 +137,20 @@ function Login() {
     });
 
     try {
-      // -------------------------------------------------------
-      // Send login request to backend
-      // -------------------------------------------------------
+      // =======================================================
+      // LOGIN REQUEST
+      //
+      // Backend expects LoginRequest as JSON:
+      //
+      // {
+      //   email: "...",
+      //   password: "...",
+      //   role: "..."
+      // }
+      //
+      // IMPORTANT:
+      // Do NOT use Axios params here.
+      // =======================================================
 
       const response = await api.post("/auth/login", {
         email: loginEmail,
@@ -112,51 +161,19 @@ function Login() {
       const data = response.data;
 
       console.log("LOGIN RESPONSE:", data);
-      console.log("AUTHENTICATED ROLE:", data.user?.role);
-      console.log("TOKEN:", data.access_token);
+
+      console.log(
+        "AUTHENTICATED ROLE:",
+        data.user?.role
+      );
+
+      console.log("TOKEN RECEIVED: YES");
 
       const authenticatedRole = data.user?.role;
 
-      // -------------------------------------------------------
-      // Normalize roles for comparison
-      // -------------------------------------------------------
-
-      const normalizeRole = (r) => {
-        if (!r) return "";
-
-        const clean = r
-          .trim()
-          .toLowerCase()
-          .replace(/[\.\/_\-\s]/g, "");
-
-        if (
-          clean === "departmentcoordinator" ||
-          clean === "deptcoordinator"
-        ) {
-          return "deptcoordinator";
-        }
-
-        if (
-          clean === "principaldirector" ||
-          clean === "principal"
-        ) {
-          return "principaldirector";
-        }
-
-        if (
-          clean === "naaccoordinator" ||
-          clean === "coordinator"
-        ) {
-          return "naaccoordinator";
-        }
-
-        return clean;
-      };
-
-      // -------------------------------------------------------
-      // Role validation
-      // Selected role MUST match actual account role
-      // -------------------------------------------------------
+      // =======================================================
+      // CHECK AUTHENTICATED ROLE
+      // =======================================================
 
       if (
         normalizeRole(selectedRole) !==
@@ -173,42 +190,42 @@ function Login() {
         return;
       }
 
-      // -------------------------------------------------------
-      // Save JWT token
-      // -------------------------------------------------------
+      // =======================================================
+      // SAVE JWT TOKEN
+      // =======================================================
 
       localStorage.setItem(
         "accessToken",
         data.access_token
       );
 
-      // -------------------------------------------------------
-      // Save user information
-      // -------------------------------------------------------
+      // =======================================================
+      // SAVE USER
+      // =======================================================
 
       localStorage.setItem(
         "user",
         JSON.stringify(data.user)
       );
 
-      // -------------------------------------------------------
-      // Save verified role
-      // -------------------------------------------------------
+      // =======================================================
+      // SAVE VERIFIED ROLE
+      // =======================================================
 
       localStorage.setItem(
         "selectedRole",
         authenticatedRole || selectedRole
       );
 
-      // -------------------------------------------------------
-      // Sync authentication context
-      // -------------------------------------------------------
+      // =======================================================
+      // SYNC AUTH CONTEXT
+      // =======================================================
 
       syncAuthFromStorage();
 
-      // -------------------------------------------------------
-      // Remember email
-      // -------------------------------------------------------
+      // =======================================================
+      // REMEMBER EMAIL
+      // =======================================================
 
       if (rememberMe) {
         localStorage.setItem(
@@ -216,12 +233,14 @@ function Login() {
           loginEmail
         );
       } else {
-        localStorage.removeItem("rememberedEmail");
+        localStorage.removeItem(
+          "rememberedEmail"
+        );
       }
 
-      // -------------------------------------------------------
-      // Redirect
-      // -------------------------------------------------------
+      // =======================================================
+      // REDIRECT
+      // =======================================================
 
       if (authenticatedRole === "Admin") {
         console.log(
@@ -236,11 +255,10 @@ function Login() {
 
         navigate("/dashboard");
       }
-
     } catch (error) {
-      // -------------------------------------------------------
-      // Login error
-      // -------------------------------------------------------
+      // =======================================================
+      // LOGIN ERROR
+      // =======================================================
 
       console.error("LOGIN FAILED:", error);
 
@@ -255,16 +273,49 @@ function Login() {
           error.response.data
         );
 
-        setError(
-          error.response.data?.detail ||
-          "Invalid email, password, or user type."
-        );
+        const detail =
+          error.response.data?.detail;
+
+        // -----------------------------------------------------
+        // FastAPI validation errors
+        // -----------------------------------------------------
+
+        if (Array.isArray(detail)) {
+          setError(
+            detail
+              .map(
+                (item) =>
+                  item?.msg ||
+                  "Invalid login details."
+              )
+              .join(", ")
+          );
+        }
+
+        // -----------------------------------------------------
+        // Normal FastAPI HTTPException
+        // -----------------------------------------------------
+
+        else if (
+          typeof detail === "string"
+        ) {
+          setError(detail);
+        }
+
+        // -----------------------------------------------------
+        // Unknown backend error
+        // -----------------------------------------------------
+
+        else {
+          setError(
+            "Invalid email, password, or user type."
+          );
+        }
       } else {
         setError(
           "Unable to connect to the backend server."
         );
       }
-
     } finally {
       setLoading(false);
     }
@@ -309,7 +360,6 @@ function Login() {
 
         </div>
 
-
         {/* Main Content */}
 
         <div className="brand-content">
@@ -317,7 +367,6 @@ function Login() {
           <div className="suite-badge">
             ✦ &nbsp; NAAC Accreditation Management Suite
           </div>
-
 
           <h1>
             Smarter Accreditation.
@@ -328,14 +377,12 @@ function Login() {
             </span>
           </h1>
 
-
           <p className="brand-description">
             Empowering institutions to manage
             accreditation, evidence, reviews, and
             institutional growth through one
             intelligent platform.
           </p>
-
 
           {/* Feature 1 */}
 
@@ -359,7 +406,6 @@ function Login() {
 
           </div>
 
-
           {/* Feature 2 */}
 
           <div className="feature-item">
@@ -381,7 +427,6 @@ function Login() {
             </div>
 
           </div>
-
 
           {/* Feature 3 */}
 
@@ -405,7 +450,6 @@ function Login() {
 
           </div>
 
-
           {/* Stats */}
 
           <div className="stats-card">
@@ -422,7 +466,6 @@ function Login() {
 
             </div>
 
-
             <div>
 
               <small>
@@ -434,7 +477,6 @@ function Login() {
               </strong>
 
             </div>
-
 
             <div>
 
@@ -452,7 +494,6 @@ function Login() {
 
         </div>
 
-
         {/* Footer */}
 
         <div className="brand-footer">
@@ -462,15 +503,18 @@ function Login() {
           </span>
 
           <span>
+
             <i></i>
+
             Institutional Cloud Architecture •
+
             ISO/IEC 27001
+
           </span>
 
         </div>
 
       </section>
-
 
       {/* =====================================================
           RIGHT SIDE
@@ -494,7 +538,6 @@ function Login() {
 
         </div>
 
-
         {/* Login Card */}
 
         <div className="login-card">
@@ -511,7 +554,6 @@ function Login() {
             </p>
 
           </div>
-
 
           {/* =================================================
               LOGIN FORM
@@ -553,12 +595,14 @@ function Login() {
                     whiteSpace: "nowrap",
                   }}
                 >
+
                   <ShieldCheck size={13} />
+
                   Active RBAC Routing
+
                 </span>
 
               </div>
-
 
               {/* Role Dropdown */}
 
@@ -570,12 +614,15 @@ function Login() {
 
                 <button
                   type="button"
+
                   onClick={() =>
                     setRoleDropdownOpen(
                       !roleDropdownOpen
                     )
                   }
+
                   className="input-container"
+
                   style={{
                     width: "100%",
                     cursor: "pointer",
@@ -613,21 +660,22 @@ function Login() {
 
                   </span>
 
-
                   <ChevronDown
                     size={18}
+
                     style={{
                       color: "#64748b",
+
                       transform: roleDropdownOpen
                         ? "rotate(180deg)"
                         : "rotate(0deg)",
+
                       transition:
                         "transform 0.2s ease",
                     }}
                   />
 
                 </button>
-
 
                 {/* Dropdown Options */}
 
@@ -653,58 +701,79 @@ function Login() {
 
                       <button
                         key={role}
+
                         type="button"
+
                         onClick={() => {
                           setSelectedRole(role);
                           setRoleDropdownOpen(false);
                           setError("");
                         }}
+
                         style={{
                           width: "100%",
                           border: "none",
+
                           background:
                             selectedRole === role
                               ? "#f1f5ff"
                               : "transparent",
+
                           borderRadius: "7px",
+
                           padding: "10px 12px",
+
                           textAlign: "left",
+
                           cursor: "pointer",
+
                           color:
                             selectedRole === role
                               ? "#4058b8"
                               : "#172033",
+
                           fontSize: "14px",
+
                           fontWeight:
                             selectedRole === role
                               ? "600"
                               : "400",
+
                           fontFamily: "inherit",
+
                           transition:
                             "background 0.15s ease",
                         }}
+
                         onMouseEnter={(event) => {
 
                           if (
                             selectedRole !== role
                           ) {
+
                             event.currentTarget.style.background =
                               "#f8fafc";
+
                           }
 
                         }}
+
                         onMouseLeave={(event) => {
 
                           if (
                             selectedRole !== role
                           ) {
+
                             event.currentTarget.style.background =
                               "transparent";
+
                           }
 
                         }}
                       >
+
                         {role}
+
                       </button>
 
                     ))}
@@ -716,7 +785,6 @@ function Login() {
               </div>
 
             </div>
-
 
             {/* =================================================
                 EMAIL
@@ -736,7 +804,6 @@ function Login() {
 
               </div>
 
-
               <div className="input-container">
 
                 <Mail size={17} />
@@ -745,16 +812,17 @@ function Login() {
                   type="email"
                   placeholder="coordinator@university.edu"
                   value={email}
+
                   onChange={(event) =>
                     setEmail(event.target.value)
                   }
+
                   required
                 />
 
               </div>
 
             </div>
-
 
             {/* =================================================
                 PASSWORD
@@ -774,7 +842,6 @@ function Login() {
 
               </div>
 
-
               <div className="input-container">
 
                 <Lock size={17} />
@@ -785,18 +852,22 @@ function Login() {
                       ? "text"
                       : "password"
                   }
+
                   placeholder="Enter your password"
+
                   value={password}
+
                   onChange={(event) =>
                     setPassword(event.target.value)
                   }
+
                   required
                 />
-
 
                 <button
                   type="button"
                   className="eye-button"
+
                   onClick={() =>
                     setShowPassword(
                       !showPassword
@@ -816,7 +887,6 @@ function Login() {
 
             </div>
 
-
             {/* =================================================
                 OPTIONS
             ================================================= */}
@@ -828,6 +898,7 @@ function Login() {
                 <input
                   type="checkbox"
                   checked={rememberMe}
+
                   onChange={(event) =>
                     setRememberMe(
                       event.target.checked
@@ -841,19 +912,19 @@ function Login() {
 
               </label>
 
-
               <button
                 type="button"
+
                 onClick={() =>
                   navigate("/forgot-password")
                 }
+
                 className="forgot-button"
               >
                 Forgot Password?
               </button>
 
             </div>
-
 
             {/* =================================================
                 ERROR
@@ -866,7 +937,6 @@ function Login() {
               </div>
 
             )}
-
 
             {/* =================================================
                 SIGN IN
@@ -891,7 +961,6 @@ function Login() {
 
           </form>
 
-
           {/* =================================================
               SECURITY
           ================================================= */}
@@ -906,7 +975,6 @@ function Login() {
             </span>
 
           </div>
-
 
           {/* =================================================
               OR
@@ -923,7 +991,6 @@ function Login() {
             <span></span>
 
           </div>
-
 
           {/* =================================================
               GOOGLE WORKSPACE
@@ -942,7 +1009,6 @@ function Login() {
 
           </button>
 
-
           {/* =================================================
               REGISTRATION
           ================================================= */}
@@ -958,7 +1024,6 @@ function Login() {
           </div>
 
         </div>
-
 
         {/* =====================================================
             ROLE INFORMATION
@@ -985,7 +1050,6 @@ function Login() {
 
         </div>
 
-
         {/* =====================================================
             FOOTER
         ===================================================== */}
@@ -1007,6 +1071,5 @@ function Login() {
     </div>
   );
 }
-
 
 export default Login;

@@ -1,13 +1,32 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Text,
+    DateTime,
+    ForeignKey,
+)
+
 from app.db.database import Base
 
 
 class Review(Base):
     __tablename__ = "reviews"
 
-    id = Column(Integer, primary_key=True, index=True)
+    # ---------------------------------------------------------
+    # PRIMARY KEY
+    # ---------------------------------------------------------
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
 
+    # ---------------------------------------------------------
+    # SUBMISSION BEING REVIEWED
+    # ---------------------------------------------------------
     submission_id = Column(
         Integer,
         ForeignKey("submissions.id"),
@@ -15,6 +34,9 @@ class Review(Base):
         index=True
     )
 
+    # ---------------------------------------------------------
+    # REVIEWER
+    # ---------------------------------------------------------
     reviewer_id = Column(
         Integer,
         ForeignKey("users.id"),
@@ -22,15 +44,35 @@ class Review(Base):
         index=True
     )
 
+    # ---------------------------------------------------------
+    # REVIEW RESULT
+    #
+    # Allowed values:
+    #
+    # Approved
+    # Rejected
+    # Changes Requested
+    # ---------------------------------------------------------
     status = Column(
         String(50),
-        nullable=False
-    )  # Approved, Rejected, Changes Requested
+        nullable=False,
+        index=True
+    )
 
-    comments = Column(Text, nullable=True)
+    # ---------------------------------------------------------
+    # REVIEWER COMMENTS
+    # ---------------------------------------------------------
+    comments = Column(
+        Text,
+        nullable=True
+    )
 
+    # ---------------------------------------------------------
+    # TIMESTAMP
+    # ---------------------------------------------------------
     created_at = Column(
         DateTime,
         default=datetime.utcnow,
         nullable=False
     )
+
