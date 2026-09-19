@@ -17,19 +17,8 @@ export const Submissions = () => {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
 
-  // =========================
-  // CURRENT USER
-  // =========================
-
-  const user = JSON.parse(
-    localStorage.getItem("user") || "{}"
-  );
-
+  const user = JSON.parse(localStorage.getItem("user") || "{}");
   const role = user?.role;
-
-  // =========================
-  // ROLE DEFINITIONS
-  // =========================
 
   const allowedSubmissionRoles = [
     "NAAC Coordinator",
@@ -40,8 +29,7 @@ export const Submissions = () => {
     "Principal / Director",
   ];
 
-  const isSubmissionAuthorized =
-    allowedSubmissionRoles.includes(role);
+  const isSubmissionAuthorized = allowedSubmissionRoles.includes(role);
 
   const isDataEntryRole = [
     "NAAC Coordinator",
@@ -49,52 +37,28 @@ export const Submissions = () => {
     "Committee Member",
   ].includes(role);
 
-  const isReviewer =
-    role === "Reviewer";
+  const isReviewer = role === "Reviewer";
+  const isDataApprover = role === "Data Approver";
+  const isPrincipal = role === "Principal / Director";
 
-  const isDataApprover =
-    role === "Data Approver";
-
-  const isPrincipal =
-    role === "Principal / Director";
-
-  // =========================
+  // ============================================================
   // LOAD SUBMISSIONS
-  // =========================
+  // ============================================================
 
   const loadSubmissions = async () => {
-    /*
-     * IMPORTANT:
-     * Admin is NOT authorized to access
-     * the NAAC submission workflow.
-     *
-     * Therefore we do not even call:
-     * GET /submissions
-     *
-     * This prevents the 403 error.
-     */
-
     if (!isSubmissionAuthorized) {
-      console.log(
-        `SUBMISSIONS ACCESS SKIPPED FOR ROLE: ${role}`
-      );
-
+      console.log(`SUBMISSIONS ACCESS SKIPPED FOR ROLE: ${role}`);
       setSubmissions([]);
       setLoading(false);
-
       return;
     }
 
     try {
       setLoading(true);
 
-      const data =
-        await submissionService.getSubmissions();
+      const data = await submissionService.getSubmissions();
 
-      console.log(
-        "SUBMISSIONS DATA:",
-        data
-      );
+      console.log("SUBMISSIONS DATA:", data);
 
       if (Array.isArray(data)) {
         const formatted = data.map((sub) => ({
@@ -160,15 +124,13 @@ export const Submissions = () => {
     loadSubmissions();
   }, [role]);
 
-  // =========================
-  // CREATE SUBMISSION
-  // =========================
+  // ============================================================
+  // CREATE
+  // ============================================================
 
   const handleCreate = async () => {
     if (!isDataEntryRole) {
-      alert(
-        "You are not authorized to create submissions."
-      );
+      alert("You are not authorized to create submissions.");
       return;
     }
 
@@ -193,9 +155,7 @@ export const Submissions = () => {
       );
 
       const response =
-        await submissionService.createSubmission(
-          item
-        );
+        await submissionService.createSubmission(item);
 
       console.log(
         "CREATE SUBMISSION RESPONSE:",
@@ -218,18 +178,15 @@ export const Submissions = () => {
     }
   };
 
-  // =========================
-  // SUBMIT DRAFT
-  // DRAFT → SUBMITTED
-  // =========================
+  // ============================================================
+  // SUBMIT
+  // ============================================================
 
   const handleSubmit = async (id) => {
     try {
       setActionLoading(id);
 
-      await submissionService.submitSubmission(
-        id
-      );
+      await submissionService.submitSubmission(id);
 
       await loadSubmissions();
     } catch (error) {
@@ -247,18 +204,15 @@ export const Submissions = () => {
     }
   };
 
-  // =========================
+  // ============================================================
   // RESUBMIT
-  // CHANGES REQUESTED → SUBMITTED
-  // =========================
+  // ============================================================
 
   const handleResubmit = async (id) => {
     try {
       setActionLoading(id);
 
-      await submissionService.resubmitSubmission(
-        id
-      );
+      await submissionService.resubmitSubmission(id);
 
       await loadSubmissions();
     } catch (error) {
@@ -276,10 +230,9 @@ export const Submissions = () => {
     }
   };
 
-  // =========================
-  // START REVIEW
-  // SUBMITTED → UNDER REVIEW
-  // =========================
+  // ============================================================
+  // REVIEWER - START REVIEW
+  // ============================================================
 
   const handleStartReview = async (id) => {
     try {
@@ -303,22 +256,19 @@ export const Submissions = () => {
     }
   };
 
-  // =========================
-  // REVIEW APPROVE
-  // =========================
+  // ============================================================
+  // REVIEWER - APPROVE
+  // ============================================================
 
   const handleReviewApprove = async (id) => {
     try {
       setActionLoading(id);
 
-      await submissionService.reviewSubmission(
-        id,
-        {
-          status: "Approved",
-          comments:
-            "Submission reviewed and approved.",
-        }
-      );
+      await submissionService.reviewSubmission(id, {
+        status: "Approved",
+        comments:
+          "Submission reviewed and approved.",
+      });
 
       await loadSubmissions();
     } catch (error) {
@@ -336,29 +286,24 @@ export const Submissions = () => {
     }
   };
 
-  // =========================
-  // REVIEW REQUEST CHANGES
-  // =========================
+  // ============================================================
+  // REVIEWER - REQUEST CHANGES
+  // ============================================================
 
   const handleReviewChanges = async (id) => {
     const comments = window.prompt(
       "Enter reason for requesting changes:"
     );
 
-    if (!comments) {
-      return;
-    }
+    if (!comments) return;
 
     try {
       setActionLoading(id);
 
-      await submissionService.reviewSubmission(
-        id,
-        {
-          status: "Changes Requested",
-          comments,
-        }
-      );
+      await submissionService.reviewSubmission(id, {
+        status: "Changes Requested",
+        comments,
+      });
 
       await loadSubmissions();
     } catch (error) {
@@ -376,28 +321,23 @@ export const Submissions = () => {
     }
   };
 
-  // =========================
-  // REJECT
-  // =========================
+  // ============================================================
+  // REVIEWER - REJECT
+  // ============================================================
 
   const handleReject = async (id) => {
     const reason = window.prompt(
       "Enter rejection reason:"
     );
 
-    if (!reason) {
-      return;
-    }
+    if (!reason) return;
 
     try {
       setActionLoading(id);
 
-      await submissionService.rejectSubmission(
-        id,
-        {
-          reason,
-        }
-      );
+      await submissionService.rejectSubmission(id, {
+        reason,
+      });
 
       await loadSubmissions();
     } catch (error) {
@@ -415,22 +355,18 @@ export const Submissions = () => {
     }
   };
 
-  // =========================
-  // DATA APPROVAL
-  // APPROVED → DATA APPROVED
-  // =========================
+  // ============================================================
+  // DATA APPROVER - APPROVE
+  // ============================================================
 
   const handleDataApprove = async (id) => {
     try {
       setActionLoading(id);
 
-      await submissionService.approveSubmission(
-        id,
-        {
-          comments:
-            "Data verified and approved.",
-        }
-      );
+      await submissionService.approveSubmission(id, {
+        comments:
+          "Data verified and approved.",
+      });
 
       await loadSubmissions();
     } catch (error) {
@@ -448,25 +384,21 @@ export const Submissions = () => {
     }
   };
 
-  // =========================
-  // DATA REQUEST CHANGES
-  // =========================
+  // ============================================================
+  // DATA APPROVER - REJECT
+  // ============================================================
 
-  const handleDataRequestChanges = async (
-    id
-  ) => {
+  const handleDataReject = async (id) => {
     const reason = window.prompt(
-      "Enter reason for requesting changes:"
+      "Enter reason for rejection:"
     );
 
-    if (!reason) {
-      return;
-    }
+    if (!reason) return;
 
     try {
       setActionLoading(id);
 
-      await submissionService.requestChanges(
+      await submissionService.rejectSubmissionByDataApprover(
         id,
         {
           reason,
@@ -476,34 +408,31 @@ export const Submissions = () => {
       await loadSubmissions();
     } catch (error) {
       console.error(
-        "DATA REQUEST CHANGES ERROR:",
+        "DATA APPROVER REJECTION ERROR:",
         error?.response?.data || error
       );
 
       alert(
         error?.response?.data?.detail ||
-          "Unable to request changes."
+          "Unable to reject submission."
       );
     } finally {
       setActionLoading(null);
     }
   };
 
-  // =========================
-  // PRINCIPAL FINAL APPROVAL
-  // =========================
+  // ============================================================
+  // PRINCIPAL / DIRECTOR - FINAL APPROVE
+  // ============================================================
 
   const handleFinalApprove = async (id) => {
     try {
       setActionLoading(id);
 
-      await submissionService.finalApprove(
-        id,
-        {
-          comments:
-            "Final approval granted by Principal / Director.",
-        }
-      );
+      await submissionService.finalApprove(id, {
+        comments:
+          "Final approval granted by Principal / Director.",
+      });
 
       await loadSubmissions();
     } catch (error) {
@@ -521,9 +450,9 @@ export const Submissions = () => {
     }
   };
 
-  // =========================
-  // FINAL NAAC SUBMISSION
-  // =========================
+  // ============================================================
+  // PRINCIPAL / DIRECTOR - FINAL SUBMIT
+  // ============================================================
 
   const handleFinalSubmit = async (id) => {
     try {
@@ -535,9 +464,7 @@ export const Submissions = () => {
       );
 
       const response =
-        await submissionService.finalSubmit(
-          id
-        );
+        await submissionService.finalSubmit(id);
 
       console.log(
         "FINAL SUBMISSION RESPONSE:",
@@ -560,9 +487,9 @@ export const Submissions = () => {
     }
   };
 
-  // =========================
-  // ACTION BUTTONS
-  // =========================
+  // ============================================================
+  // ACTION RENDERING
+  // ============================================================
 
   const renderActions = (row) => {
     const status = row.status;
@@ -570,9 +497,9 @@ export const Submissions = () => {
     const isLoading =
       actionLoading === row.id;
 
-    // =========================
+    // ========================================================
     // DATA ENTRY ROLES
-    // =========================
+    // ========================================================
 
     if (isDataEntryRole) {
       if (status === "Draft") {
@@ -615,9 +542,9 @@ export const Submissions = () => {
       );
     }
 
-    // =========================
+    // ========================================================
     // REVIEWER
-    // =========================
+    // ========================================================
 
     if (isReviewer) {
       if (status === "Submitted") {
@@ -643,11 +570,10 @@ export const Submissions = () => {
               gap: "6px",
             }}
           >
+            {/* Approve */}
             <button
               onClick={() =>
-                handleReviewApprove(
-                  row.id
-                )
+                handleReviewApprove(row.id)
               }
               disabled={isLoading}
               title="Approve"
@@ -656,11 +582,10 @@ export const Submissions = () => {
               <CheckCircle size={16} />
             </button>
 
+            {/* Request Changes */}
             <button
               onClick={() =>
-                handleReviewChanges(
-                  row.id
-                )
+                handleReviewChanges(row.id)
               }
               disabled={isLoading}
               title="Request Changes"
@@ -669,6 +594,7 @@ export const Submissions = () => {
               <RotateCcw size={16} />
             </button>
 
+            {/* Reject */}
             <button
               onClick={() =>
                 handleReject(row.id)
@@ -684,9 +610,9 @@ export const Submissions = () => {
       }
     }
 
-    // =========================
+    // ========================================================
     // DATA APPROVER
-    // =========================
+    // ========================================================
 
     if (isDataApprover) {
       if (status === "Approved") {
@@ -697,53 +623,45 @@ export const Submissions = () => {
               gap: "6px",
             }}
           >
+            {/* Approve */}
             <button
               onClick={() =>
-                handleDataApprove(
-                  row.id
-                )
+                handleDataApprove(row.id)
               }
               disabled={isLoading}
-              title="Approve Data"
+              title="Approve"
               style={actionButtonStyle}
             >
               <CheckCircle size={16} />
             </button>
 
+            {/* Reject */}
             <button
               onClick={() =>
-                handleDataRequestChanges(
-                  row.id
-                )
+                handleDataReject(row.id)
               }
               disabled={isLoading}
-              title="Request Changes"
+              title="Reject"
               style={actionButtonStyle}
             >
-              <RotateCcw size={16} />
+              <XCircle size={16} />
             </button>
           </div>
         );
       }
     }
 
-    // =========================
+    // ========================================================
     // PRINCIPAL / DIRECTOR
-    // =========================
+    // ========================================================
 
     if (isPrincipal) {
-      /*
-       * Final approval happens after
-       * Data Approver approval.
-       */
-
-      if (status === "Approved") {
+      // Data Approver has completed approval.
+      if (status === "Data Approved") {
         return (
           <button
             onClick={() =>
-              handleFinalApprove(
-                row.id
-              )
+              handleFinalApprove(row.id)
             }
             disabled={isLoading}
             title="Final Approval"
@@ -754,25 +672,12 @@ export const Submissions = () => {
         );
       }
 
-      /*
-       * Backend/UI may return either:
-       *
-       * Final Approved
-       * Final Approval
-       *
-       * Support both.
-       */
-
-      if (
-        status === "Final Approved" ||
-        status === "Final Approval"
-      ) {
+      // Principal has given final approval.
+      if (status === "Final Approval") {
         return (
           <button
             onClick={() =>
-              handleFinalSubmit(
-                row.id
-              )
+              handleFinalSubmit(row.id)
             }
             disabled={isLoading}
             title="Final NAAC Submission"
@@ -784,9 +689,9 @@ export const Submissions = () => {
       }
     }
 
-    // =========================
+    // ========================================================
     // DEFAULT VIEW
-    // =========================
+    // ========================================================
 
     return (
       <button
@@ -798,9 +703,9 @@ export const Submissions = () => {
     );
   };
 
-  // =========================
+  // ============================================================
   // TABLE COLUMNS
-  // =========================
+  // ============================================================
 
   const columns = [
     {
@@ -842,17 +747,9 @@ export const Submissions = () => {
     },
   ];
 
-  // =========================
-  // UI
-  // =========================
-
-  /*
-   * Admin should not use the Submission module.
-   *
-   * If Admin somehow reaches this route directly,
-   * show an access message instead of attempting
-   * GET /submissions.
-   */
+  // ============================================================
+  // ACCESS RESTRICTED
+  // ============================================================
 
   if (!isSubmissionAuthorized) {
     return (
@@ -882,12 +779,14 @@ export const Submissions = () => {
             style={{
               width: "56px",
               height: "56px",
-              margin: "0 auto 16px",
+              margin:
+                "0 auto 16px",
               borderRadius: "50%",
               background: "#f1f5f9",
               display: "flex",
               alignItems: "center",
-              justifyContent: "center",
+              justifyContent:
+                "center",
             }}
           >
             <XCircle
@@ -912,7 +811,8 @@ export const Submissions = () => {
               fontSize: "14px",
             }}
           >
-            The {role || "current"} role is not
+            The{" "}
+            {role || "current"} role is not
             authorized to access the NAAC
             submission workflow.
           </p>
@@ -920,6 +820,10 @@ export const Submissions = () => {
       </div>
     );
   }
+
+  // ============================================================
+  // MAIN PAGE
+  // ============================================================
 
   return (
     <div
@@ -975,19 +879,33 @@ export const Submissions = () => {
   );
 };
 
-// =========================
+// ============================================================
 // ACTION BUTTON STYLE
-// =========================
+// ============================================================
 
 const actionButtonStyle = {
-  border: "1px solid #e2e8f0",
-  background: "#ffffff",
+  border:
+    "1px solid #e2e8f0",
+
+  background:
+    "#ffffff",
+
   borderRadius: "7px",
-  padding: "6px 8px",
-  cursor: "pointer",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
+
+  padding:
+    "6px 8px",
+
+  cursor:
+    "pointer",
+
+  display:
+    "inline-flex",
+
+  alignItems:
+    "center",
+
+  justifyContent:
+    "center",
 };
 
 export default Submissions;

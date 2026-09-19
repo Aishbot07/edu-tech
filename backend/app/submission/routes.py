@@ -16,6 +16,7 @@ from app.models import (
     Permission,
     Criterion,
     Department,
+    Metric,
 )
 from app.schemas.submission import (
     SubmissionCreate,
@@ -237,9 +238,18 @@ def get_submission_criterion_module(
 
         if criterion:
 
-            criterion_number = str(
+            raw_number = str(
                 criterion.number
-            ).split(".")[0]
+            ).strip()
+
+            # Support criterion values such as:
+            # C1, C2, C3
+            # 1, 2, 3
+            # 1.1, 2.1, etc.
+            if raw_number.upper().startswith("C"):
+                raw_number = raw_number[1:]
+
+            criterion_number = raw_number.split(".")[0]
 
     if (
         not criterion_number
@@ -580,23 +590,6 @@ def create_submission(
 
     institution_id = current_user.institution_id
 
-    # --------------------------------------------------------
-    # Institution validation
-    # --------------------------------------------------------
-
-    if (
-        sub_data.institution_id is not None
-        and sub_data.institution_id != institution_id
-    ):
-
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "You cannot create a submission "
-                "for another institution"
-            )
-        )
-
     # ========================================================
     # DEPARTMENT
     # ========================================================
@@ -761,7 +754,7 @@ def create_submission(
 
     submission = Submission(
         institution_id=institution_id,
-        cycle_id=sub_data.cycle_id,
+        cycle_id=None,
         criterion_id=sub_data.criterion_id,
         department_id=department_id,
         user_id=current_user.id,
@@ -1299,11 +1292,62 @@ def review_submission(
             )
         )
 
+    # ========================================================
+    # DETERMINE MAXIMUM SCORE FROM METRIC
+    # ========================================================
+
+    max_score = None
+
+    if submission.metric_code:
+
+        metric = (
+            db.query(Metric)
+            .filter(
+                Metric.code == submission.metric_code
+            )
+            .first()
+        )
+
+        if metric:
+            max_score = metric.max_score
+
+    # ========================================================
+    # VALIDATE REVIEWER SCORE
+    # ========================================================
+
+    if review_data.score is not None:
+
+        if max_score is None:
+
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Unable to determine maximum score "
+                    "for this metric"
+                )
+            )
+
+        if review_data.score > max_score:
+
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Score cannot exceed maximum score "
+                    f"of {max_score}"
+                )
+            )
+
+    # ========================================================
+    # CREATE REVIEW
+    # ========================================================
+
     review = Review(
         submission_id=submission.id,
         reviewer_id=current_user.id,
         status=review_data.status,
         comments=review_data.comments,
+        score=review_data.score,
+        max_score=max_score,
     )
 
     db.add(review)
@@ -1523,13 +1567,17 @@ def data_approve_submission(
 # DATA APPROVER - REQUEST CHANGES
 # ============================================================
 
+# ============================================================
+# DATA APPROVER - REJECT
+# ============================================================
+
 @router.post(
-    "/{sub_id}/data-request-changes",
+    "/{sub_id}/data-reject",
     response_model=WorkflowActionResponse
 )
-def data_request_changes(
+def data_reject_submission(
     sub_id: int,
-    change_data: SubmissionChangeRequest,
+    rejection_data: SubmissionRejectionRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -1546,8 +1594,8 @@ def data_request_changes(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(
-                "Only Data Approvers can request "
-                "data changes"
+                "Only Data Approvers can reject "
+                "submissions"
             )
         )
 
@@ -1567,14 +1615,14 @@ def data_request_changes(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 "Only reviewer-approved submissions "
-                "can be sent for data changes"
+                "can be rejected by the Data Approver"
             )
         )
 
-    submission.status = "Changes Requested"
+    submission.status = "Rejected"
 
-    submission.change_request_reason = (
-        change_data.reason
+    submission.rejection_reason = (
+        rejection_data.reason
     )
 
     submission.updated_at = datetime.utcnow()
@@ -1590,10 +1638,9 @@ def data_request_changes(
         raise
 
     return {
-        "message": "Changes requested by Data Approver",
+        "message": "Submission rejected by Data Approver",
         "submission": submission,
     }
-
 
 # ============================================================
 # FINAL APPROVAL
