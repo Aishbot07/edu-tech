@@ -208,11 +208,21 @@ export const AppRoutes = () => {
 
         {/* =========================================
             DEPARTMENTS
+            ADMIN + INSTITUTION ADMIN
         ========================================= */}
 
         <Route
           path="/departments"
-          element={<Departments />}
+          element={
+            <ProtectedRoute
+              roles={[
+                "Admin",
+                "Institution Admin",
+              ]}
+            >
+              <Departments />
+            </ProtectedRoute>
+          }
         />
 
         {/* =========================================
@@ -269,10 +279,11 @@ export const AppRoutes = () => {
           path="/documents"
           element={<Documents />}
         />
+
         <Route
-           path="/documents/upload"
-           element={<EvidenceUpload />}
-          />
+          path="/documents/upload"
+          element={<EvidenceUpload />}
+        />
 
         {/* =========================================
             SUBMISSIONS
@@ -320,13 +331,25 @@ export const AppRoutes = () => {
         />
 
         {/* =========================================
-            ADMIN - USER MANAGEMENT
+            USER MANAGEMENT
+            ADMIN + INSTITUTION ADMIN
+
+            Admin:
+            - Manage all platform users
+
+            Institution Admin:
+            - Manage users of their own institution
         ========================================= */}
 
         <Route
           path="/admin/users"
           element={
-            <ProtectedRoute role="Admin">
+            <ProtectedRoute
+              roles={[
+                "Admin",
+                "Institution Admin",
+              ]}
+            >
               <UserManagement />
             </ProtectedRoute>
           }
@@ -334,6 +357,7 @@ export const AppRoutes = () => {
 
         {/* =========================================
             ADMIN - ROLES & PERMISSIONS
+            ADMIN ONLY
         ========================================= */}
 
         <Route
@@ -373,6 +397,7 @@ export const AppRoutes = () => {
 
         {/* =========================================
             ADMIN - SYSTEM SETTINGS
+            ADMIN ONLY
         ========================================= */}
 
         <Route

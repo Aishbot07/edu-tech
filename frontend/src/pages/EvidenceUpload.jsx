@@ -12,7 +12,10 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { useNavigate } from "react-router-dom";
+import {
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 
 import criteriaService from "../services/criteriaService";
 import submissionService from "../services/submissionService";
@@ -33,37 +36,166 @@ const ALLOWED_EXTENSIONS = [
   "png",
 ];
 
+const EDITABLE_STATUSES = new Set([
+  "draft",
+  "changes requested",
+  "resubmitted",
+]);
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+const normalizeText = (value) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+const isEditableStatus = (status) =>
+  EDITABLE_STATUSES.has(
+    normalizeText(status)
+  );
+
+const getErrorMessage = (
+  error,
+  fallback
+) => {
+  const detail =
+    error?.response?.data?.detail;
+
+  if (typeof detail === "string") {
+    return detail;
+  }
+
+  if (Array.isArray(detail)) {
+    return detail
+      .map(
+        (item) =>
+          item?.msg ||
+          String(item)
+      )
+      .join(", ");
+  }
+
+  if (
+    error?.message &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+
+  return fallback;
+};
+
+const formatBytes = (bytes) => {
+  if (!bytes) {
+    return "0 B";
+  }
+
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${(
+      bytes / 1024
+    ).toFixed(1)} KB`;
+  }
+
+  if (bytes < 1024 * 1024 * 1024) {
+    return `${(
+      bytes /
+      (1024 * 1024)
+    ).toFixed(1)} MB`;
+  }
+
+  return `${(
+    bytes /
+    (1024 * 1024 * 1024)
+  ).toFixed(1)} GB`;
+};
+
+// ============================================================
+// COMPONENT
+// ============================================================
+
 const EvidenceUpload = () => {
   const navigate = useNavigate();
 
+  const [searchParams] =
+    useSearchParams();
+
   // ==========================================================
-  // MASTER DATA
+  // URL PARAMETERS
   // ==========================================================
 
-  const [criteria, setCriteria] = useState([]);
-  const [sections, setSections] = useState([]);
-  const [metrics, setMetrics] = useState([]);
-  const [evidenceRequirements, setEvidenceRequirements] =
+  const urlSubmissionId =
+    searchParams.get(
+      "submission_id"
+    );
+
+  const urlCriterionId =
+    searchParams.get(
+      "criterion_id"
+    );
+
+  const urlMetricId =
+    searchParams.get(
+      "metric_id"
+    );
+
+  // ==========================================================
+  // DATA
+  // ==========================================================
+
+  const [criteria, setCriteria] =
     useState([]);
 
-  const [submissions, setSubmissions] =
+  const [sections, setSections] =
     useState([]);
 
-  const [documents, setDocuments] =
+  const [metrics, setMetrics] =
     useState([]);
+
+  const [
+    evidenceRequirements,
+    setEvidenceRequirements,
+  ] = useState([]);
+
+  const [
+    submissions,
+    setSubmissions,
+  ] = useState([]);
+
+  const [
+    documents,
+    setDocuments,
+  ] = useState([]);
 
   // ==========================================================
   // SELECTIONS
   // ==========================================================
 
-  const [selectedCriterionId, setSelectedCriterionId] =
-    useState("");
+  const [
+    selectedCriterionId,
+    setSelectedCriterionId,
+  ] = useState(
+    urlCriterionId || ""
+  );
 
-  const [selectedMetricId, setSelectedMetricId] =
-    useState("");
+  const [
+    selectedMetricId,
+    setSelectedMetricId,
+  ] = useState(
+    urlMetricId || ""
+  );
 
-  const [selectedSubmissionId, setSelectedSubmissionId] =
-    useState("");
+  const [
+    selectedSubmissionId,
+    setSelectedSubmissionId,
+  ] = useState(
+    urlSubmissionId || ""
+  );
 
   // ==========================================================
   // FILE
@@ -72,27 +204,30 @@ const EvidenceUpload = () => {
   const [file, setFile] =
     useState(null);
 
-  const [dragActive, setDragActive] =
-    useState(false);
+  const [
+    dragActive,
+    setDragActive,
+  ] = useState(false);
 
   // ==========================================================
-  // STATE
+  // UI
   // ==========================================================
 
   const [loading, setLoading] =
     useState(true);
 
-  const [loadingMetrics, setLoadingMetrics] =
-    useState(false);
-
-  const [refreshingDocuments, setRefreshingDocuments] =
-    useState(false);
+  const [
+    loadingMetrics,
+    setLoadingMetrics,
+  ] = useState(false);
 
   const [uploading, setUploading] =
     useState(false);
 
-  const [uploadProgress, setUploadProgress] =
-    useState(0);
+  const [
+    uploadProgress,
+    setUploadProgress,
+  ] = useState(0);
 
   const [error, setError] =
     useState("");
@@ -100,15 +235,17 @@ const EvidenceUpload = () => {
   const [message, setMessage] =
     useState("");
 
-  const [uploadedDocument, setUploadedDocument] =
-    useState(null);
+  const [
+    uploadedDocument,
+    setUploadedDocument,
+  ] = useState(null);
 
   // ==========================================================
-  // LOAD INITIAL DATA
+  // LOAD DATA
   // ==========================================================
 
   useEffect(() => {
-    const loadInitialData = async () => {
+    const loadData = async () => {
       try {
         setLoading(true);
         setError("");
@@ -127,39 +264,164 @@ const EvidenceUpload = () => {
           documentService.getDocuments(),
         ]);
 
-        setCriteria(
+        const safeCriteria =
           Array.isArray(criteriaData)
             ? criteriaData
-            : []
+            : [];
+
+        const safeMetrics =
+          Array.isArray(metricsData)
+            ? metricsData
+            : [];
+
+        const safeEvidence =
+          Array.isArray(evidenceData)
+            ? evidenceData
+            : [];
+
+        const safeSubmissions =
+          Array.isArray(
+            submissionsData
+          )
+            ? submissionsData
+            : [];
+
+        const safeDocuments =
+          Array.isArray(
+            documentsData
+          )
+            ? documentsData
+            : [];
+
+        console.log(
+          "EVIDENCE UPLOAD - CRITERIA:",
+          safeCriteria
+        );
+
+        console.log(
+          "EVIDENCE UPLOAD - METRICS:",
+          safeMetrics
+        );
+
+        console.log(
+          "EVIDENCE UPLOAD - SUBMISSIONS:",
+          safeSubmissions
+        );
+
+        console.log(
+          "EVIDENCE UPLOAD - DOCUMENTS:",
+          safeDocuments
+        );
+
+        console.log(
+          "EVIDENCE UPLOAD - URL SUBMISSION ID:",
+          urlSubmissionId
+        );
+
+        console.log(
+          "EVIDENCE UPLOAD - URL CRITERION ID:",
+          urlCriterionId
+        );
+
+        console.log(
+          "EVIDENCE UPLOAD - URL METRIC ID:",
+          urlMetricId
+        );
+
+        // ======================================================
+        // IMPORTANT SUBMISSION DEBUG
+        // ======================================================
+
+        safeSubmissions.forEach(
+          (submission) => {
+            console.log(
+              "SUBMISSION CHECK:",
+              {
+                id: submission.id,
+
+                title:
+                  submission.title,
+
+                metric_id:
+                  submission.metric_id,
+
+                metricId:
+                  submission.metricId,
+
+                metric_code:
+                  submission.metric_code,
+
+                metricCode:
+                  submission.metricCode,
+
+                criterion_id:
+                  submission.criterion_id,
+
+                department_id:
+                  submission.department_id,
+
+                institution_id:
+                  submission.institution_id,
+
+                status:
+                  submission.status,
+
+                created_at:
+                  submission.created_at,
+
+                createdAt:
+                  submission.createdAt,
+              }
+            );
+          }
+        );
+
+        // ======================================================
+        // URL SUBMISSION DEBUG
+        // ======================================================
+
+        if (urlSubmissionId) {
+          const foundSubmission =
+            safeSubmissions.find(
+              (submission) =>
+                String(
+                  submission.id
+                ) ===
+                String(
+                  urlSubmissionId
+                )
+            );
+
+          console.log(
+            "EVIDENCE UPLOAD - URL SUBMISSION FOUND:",
+            foundSubmission
+          );
+        }
+
+        setCriteria(
+          safeCriteria
         );
 
         setMetrics(
-          Array.isArray(metricsData)
-            ? metricsData
-            : []
+          safeMetrics
         );
 
         setEvidenceRequirements(
-          Array.isArray(evidenceData)
-            ? evidenceData
-            : []
+          safeEvidence
         );
 
         setSubmissions(
-          Array.isArray(submissionsData)
-            ? submissionsData
-            : []
+          safeSubmissions
         );
 
         setDocuments(
-          Array.isArray(documentsData)
-            ? documentsData
-            : []
+          safeDocuments
         );
       } catch (err) {
         console.error(
-          "LOAD EVIDENCE UPLOAD DATA ERROR:",
-          err?.response?.data || err
+          "EVIDENCE UPLOAD - LOAD ERROR:",
+          err?.response?.data ||
+            err
         );
 
         setError(
@@ -173,107 +435,324 @@ const EvidenceUpload = () => {
       }
     };
 
-    loadInitialData();
-  }, []);
+    loadData();
+  }, [
+    urlSubmissionId,
+    urlCriterionId,
+    urlMetricId,
+  ]);
 
   // ==========================================================
-  // LOAD SECTIONS WHEN CRITERION CHANGES
+  // URL SUBMISSION
+  // ==========================================================
+
+  const urlSubmission =
+    useMemo(() => {
+      if (!urlSubmissionId) {
+        return null;
+      }
+
+      return submissions.find(
+        (submission) =>
+          String(
+            submission.id
+          ) ===
+          String(
+            urlSubmissionId
+          )
+      );
+    }, [
+      submissions,
+      urlSubmissionId,
+    ]);
+
+  // ==========================================================
+  // LOG URL SUBMISSION
   // ==========================================================
 
   useEffect(() => {
-    const loadSections = async () => {
-      if (!selectedCriterionId) {
-        setSections([]);
-        setSelectedMetricId("");
-        setSelectedSubmissionId("");
-        return;
-      }
-
-      try {
-        setLoadingMetrics(true);
-        setError("");
-
-        const data =
-          await criteriaService.getSections(
-            Number(selectedCriterionId)
-          );
-
-        setSections(
-          Array.isArray(data)
-            ? data
-            : []
-        );
-
-        setSelectedMetricId("");
-        setSelectedSubmissionId("");
-        setFile(null);
-        setUploadedDocument(null);
-      } catch (err) {
-        console.error(
-          "LOAD SECTIONS ERROR:",
-          err?.response?.data || err
-        );
-
-        setSections([]);
-
-        setError(
-          getErrorMessage(
-            err,
-            "Unable to load sections."
-          )
-        );
-      } finally {
-        setLoadingMetrics(false);
-      }
-    };
-
-    loadSections();
-  }, [selectedCriterionId]);
+    console.log(
+      "EVIDENCE UPLOAD - URL SUBMISSION OBJECT:",
+      urlSubmission
+    );
+  }, [urlSubmission]);
 
   // ==========================================================
-  // FILTER METRICS FOR SELECTED CRITERION
+  // AUTO SELECT URL SUBMISSION
   // ==========================================================
 
-  const availableMetrics = useMemo(() => {
-    if (!selectedCriterionId) {
-      return [];
+  useEffect(() => {
+    if (!urlSubmission) {
+      return;
     }
 
-    const sectionIds = new Set(
-      sections.map(
-        (section) => section.id
+    console.log(
+      "EVIDENCE UPLOAD - AUTO SELECTING SUBMISSION:",
+      urlSubmission
+    );
+
+    setSelectedSubmissionId(
+      String(
+        urlSubmission.id
       )
     );
 
-    return metrics.filter(
-      (metric) =>
-        sectionIds.has(
-          metric.section_id
-        )
-    );
+    if (urlMetricId) {
+      setSelectedMetricId(
+        String(urlMetricId)
+      );
+    } else {
+      const matchingMetric =
+        metrics.find(
+          (metric) =>
+            normalizeText(
+              metric.code
+            ) ===
+            normalizeText(
+              urlSubmission.metric_code
+            )
+        );
+
+      if (matchingMetric) {
+        setSelectedMetricId(
+          String(
+            matchingMetric.id
+          )
+        );
+      }
+    }
+
+    if (urlCriterionId) {
+      setSelectedCriterionId(
+        String(urlCriterionId)
+      );
+    }
+  }, [
+    urlSubmission,
+    metrics,
+    urlMetricId,
+    urlCriterionId,
+  ]);
+
+  // ==========================================================
+  // FIND CRITERION FROM METRIC
+  // ==========================================================
+
+  useEffect(() => {
+    const findCriterion =
+      async () => {
+        if (
+          !selectedMetricId ||
+          !metrics.length ||
+          !criteria.length
+        ) {
+          return;
+        }
+
+        if (selectedCriterionId) {
+          return;
+        }
+
+        const metric =
+          metrics.find(
+            (item) =>
+              String(item.id) ===
+              String(
+                selectedMetricId
+              )
+          );
+
+        if (!metric) {
+          return;
+        }
+
+        try {
+          for (
+            const criterion of criteria
+          ) {
+            const sectionData =
+              await criteriaService.getSections(
+                Number(
+                  criterion.id
+                )
+              );
+
+            const sectionIds =
+              Array.isArray(
+                sectionData
+              )
+                ? sectionData.map(
+                    (section) =>
+                      Number(
+                        section.id
+                      )
+                  )
+                : [];
+
+            if (
+              sectionIds.includes(
+                Number(
+                  metric.section_id
+                )
+              )
+            ) {
+              setSelectedCriterionId(
+                String(
+                  criterion.id
+                )
+              );
+
+              break;
+            }
+          }
+        } catch (err) {
+          console.error(
+            "FIND CRITERION ERROR:",
+            err?.response?.data ||
+              err
+          );
+        }
+      };
+
+    findCriterion();
+  }, [
+    selectedMetricId,
+    selectedCriterionId,
+    metrics,
+    criteria,
+  ]);
+
+  // ==========================================================
+  // LOAD SECTIONS
+  // ==========================================================
+
+  useEffect(() => {
+    const loadSections =
+      async () => {
+        if (!selectedCriterionId) {
+          setSections([]);
+          return;
+        }
+
+        try {
+          setLoadingMetrics(true);
+
+          const data =
+            await criteriaService.getSections(
+              Number(
+                selectedCriterionId
+              )
+            );
+
+          const safeSections =
+            Array.isArray(data)
+              ? data
+              : [];
+
+          console.log(
+            "EVIDENCE UPLOAD - SECTIONS:",
+            safeSections
+          );
+
+          setSections(
+            safeSections
+          );
+        } catch (err) {
+          console.error(
+            "LOAD SECTIONS ERROR:",
+            err?.response?.data ||
+              err
+          );
+
+          setSections([]);
+
+          setError(
+            getErrorMessage(
+              err,
+              "Unable to load sections."
+            )
+          );
+        } finally {
+          setLoadingMetrics(false);
+        }
+      };
+
+    loadSections();
   }, [
     selectedCriterionId,
-    sections,
-    metrics,
   ]);
+
+  // ==========================================================
+  // AVAILABLE METRICS
+  // ==========================================================
+
+  const availableMetrics =
+    useMemo(() => {
+      if (!selectedCriterionId) {
+        return [];
+      }
+
+      const sectionIds =
+        new Set(
+          sections.map(
+            (section) =>
+              Number(section.id)
+          )
+        );
+
+      return metrics.filter(
+        (metric) =>
+          sectionIds.has(
+            Number(
+              metric.section_id
+            )
+          )
+      );
+    }, [
+      selectedCriterionId,
+      sections,
+      metrics,
+    ]);
 
   // ==========================================================
   // SELECTED METRIC
   // ==========================================================
 
-  const selectedMetric = useMemo(() => {
-    return metrics.find(
-      (metric) =>
-        String(metric.id) ===
-        String(selectedMetricId)
+  const selectedMetric =
+    useMemo(() => {
+      return metrics.find(
+        (metric) =>
+          String(metric.id) ===
+          String(
+            selectedMetricId
+          )
+      );
+    }, [
+      metrics,
+      selectedMetricId,
+    ]);
+
+  // ==========================================================
+  // DEBUG SELECTED METRIC
+  // ==========================================================
+
+  useEffect(() => {
+    console.log(
+      "EVIDENCE UPLOAD - SELECTED METRIC:",
+      selectedMetric
+    );
+
+    console.log(
+      "EVIDENCE UPLOAD - SELECTED METRIC ID:",
+      selectedMetricId
     );
   }, [
-    metrics,
+    selectedMetric,
     selectedMetricId,
   ]);
 
   // ==========================================================
-  // SELECTED EVIDENCE REQUIREMENT
+  // EVIDENCE REQUIREMENT
   // ==========================================================
 
   const selectedEvidenceRequirement =
@@ -284,9 +763,13 @@ const EvidenceUpload = () => {
 
       return (
         evidenceRequirements.find(
-          (evidence) =>
-            String(evidence.metric_id) ===
-            String(selectedMetricId)
+          (requirement) =>
+            String(
+              requirement.metric_id
+            ) ===
+            String(
+              selectedMetricId
+            )
         ) || null
       );
     }, [
@@ -295,39 +778,108 @@ const EvidenceUpload = () => {
     ]);
 
   // ==========================================================
-  // EDITABLE SUBMISSIONS FOR SELECTED METRIC
+  // EDITABLE SUBMISSIONS
   // ==========================================================
 
   const editableSubmissions =
     useMemo(() => {
       if (!selectedMetric) {
+        console.log(
+          "EDITABLE SUBMISSIONS: No selected metric"
+        );
+
         return [];
       }
 
-      return submissions.filter(
-        (submission) => {
-          const sameMetric =
-            String(
-              submission.metric_code
-            ) ===
-            String(
-              selectedMetric.code
-            );
-
-          const editableStatus = [
-            "Draft",
-            "Changes Requested",
-            "Resubmitted",
-          ].includes(
-            submission.status
-          );
-
-          return (
-            sameMetric &&
-            editableStatus
-          );
+      console.log(
+        "EDITABLE SUBMISSIONS - CHECKING METRIC:",
+        {
+          id: selectedMetric.id,
+          code: selectedMetric.code,
+          title: selectedMetric.title,
         }
       );
+
+      const result =
+        submissions.filter(
+          (submission) => {
+            const submissionMetricId =
+              submission.metric_id ??
+              submission.metricId;
+
+            const submissionMetricCode =
+              submission.metric_code ??
+              submission.metricCode;
+
+            const sameMetricById =
+              submissionMetricId !=
+                null &&
+              String(
+                submissionMetricId
+              ) ===
+                String(
+                  selectedMetric.id
+                );
+
+            const sameMetricByCode =
+              normalizeText(
+                submissionMetricCode
+              ) ===
+              normalizeText(
+                selectedMetric.code
+              );
+
+            const sameMetric =
+              sameMetricById ||
+              sameMetricByCode;
+
+            const editable =
+              isEditableStatus(
+                submission.status
+              );
+
+            console.log(
+              "SUBMISSION MATCH RESULT:",
+              {
+                submissionId:
+                  submission.id,
+
+                submissionMetricId,
+
+                submissionMetricCode,
+
+                selectedMetricId:
+                  selectedMetric.id,
+
+                selectedMetricCode:
+                  selectedMetric.code,
+
+                sameMetricById,
+
+                sameMetricByCode,
+
+                sameMetric,
+
+                status:
+                  submission.status,
+
+                editable,
+              }
+            );
+
+            return (
+              sameMetric &&
+              editable
+            );
+          }
+        );
+
+      console.log(
+        "EDITABLE SUBMISSIONS RESULT:",
+        result
+      );
+
+      return result;
     }, [
       submissions,
       selectedMetric,
@@ -339,41 +891,54 @@ const EvidenceUpload = () => {
 
   const selectedSubmission =
     useMemo(() => {
-      return submissions.find(
-        (submission) =>
-          String(submission.id) ===
-          String(selectedSubmissionId)
+      const submission =
+        submissions.find(
+          (item) =>
+            String(
+              item.id
+            ) ===
+            String(
+              selectedSubmissionId
+            )
+        );
+
+      console.log(
+        "SELECTED SUBMISSION:",
+        submission
       );
+
+      return submission;
     }, [
       submissions,
       selectedSubmissionId,
     ]);
 
   // ==========================================================
-  // EXISTING FILE COUNT
+  // EXISTING DOCUMENT COUNT
   // ==========================================================
 
-  const existingFileCount = useMemo(() => {
-    if (!selectedSubmissionId) {
-      return 0;
-    }
+  const existingFileCount =
+    useMemo(() => {
+      if (!selectedSubmissionId) {
+        return 0;
+      }
 
-    return documents.filter(
-      (document) =>
-        String(
-          document.submission_id
-        ) ===
-        String(
-          selectedSubmissionId
-        )
-    ).length;
-  }, [
-    documents,
-    selectedSubmissionId,
-  ]);
+      return documents.filter(
+        (document) =>
+          String(
+            document.submission_id
+          ) ===
+          String(
+            selectedSubmissionId
+          )
+      ).length;
+    }, [
+      documents,
+      selectedSubmissionId,
+    ]);
 
   // ==========================================================
-  // FILE TYPES
+  // ALLOWED FILE TYPES
   // ==========================================================
 
   const allowedExtensions =
@@ -386,8 +951,7 @@ const EvidenceUpload = () => {
       }
 
       return String(
-        selectedEvidenceRequirement
-          .allowed_file_types
+        selectedEvidenceRequirement.allowed_file_types
       )
         .split(",")
         .map((item) =>
@@ -401,10 +965,6 @@ const EvidenceUpload = () => {
       selectedEvidenceRequirement,
     ]);
 
-  // ==========================================================
-  // ACCEPT ATTRIBUTE
-  // ==========================================================
-
   const acceptAttribute =
     allowedExtensions
       .map(
@@ -414,7 +974,7 @@ const EvidenceUpload = () => {
       .join(",");
 
   // ==========================================================
-  // SELECT CRITERION
+  // CRITERION CHANGE
   // ==========================================================
 
   const handleCriterionChange = (
@@ -423,9 +983,13 @@ const EvidenceUpload = () => {
     const value =
       event.target.value;
 
-    setSelectedCriterionId(value);
+    setSelectedCriterionId(
+      value
+    );
+
     setSelectedMetricId("");
     setSelectedSubmissionId("");
+
     setFile(null);
     setError("");
     setMessage("");
@@ -434,17 +998,21 @@ const EvidenceUpload = () => {
   };
 
   // ==========================================================
-  // SELECT METRIC
+  // METRIC CHANGE
   // ==========================================================
 
   const handleMetricChange = (
     event
   ) => {
+    const value =
+      event.target.value;
+
     setSelectedMetricId(
-      event.target.value
+      value
     );
 
     setSelectedSubmissionId("");
+
     setFile(null);
     setError("");
     setMessage("");
@@ -453,14 +1021,22 @@ const EvidenceUpload = () => {
   };
 
   // ==========================================================
-  // SELECT SUBMISSION
+  // SUBMISSION CHANGE
   // ==========================================================
 
   const handleSubmissionChange = (
     event
   ) => {
+    const value =
+      event.target.value;
+
+    console.log(
+      "SUBMISSION SELECTED:",
+      value
+    );
+
     setSelectedSubmissionId(
-      event.target.value
+      value
     );
 
     setFile(null);
@@ -505,11 +1081,10 @@ const EvidenceUpload = () => {
 
     if (
       existingFileCount >=
-      maxFiles
+      Number(maxFiles)
     ) {
       return (
-        `Maximum of ${maxFiles} ` +
-        "evidence files are already uploaded."
+        `Maximum of ${maxFiles} evidence files are already uploaded.`
       );
     }
 
@@ -547,7 +1122,7 @@ const EvidenceUpload = () => {
   };
 
   // ==========================================================
-  // FILE INPUT CHANGE
+  // FILE INPUT
   // ==========================================================
 
   const handleFileInputChange = (
@@ -560,12 +1135,11 @@ const EvidenceUpload = () => {
       selectedFile
     );
 
-    // Allows selecting the same file again
     event.target.value = "";
   };
 
   // ==========================================================
-  // DRAG OVER
+  // DRAG EVENTS
   // ==========================================================
 
   const handleDragOver = (
@@ -579,10 +1153,6 @@ const EvidenceUpload = () => {
     }
   };
 
-  // ==========================================================
-  // DRAG LEAVE
-  // ==========================================================
-
   const handleDragLeave = (
     event
   ) => {
@@ -591,10 +1161,6 @@ const EvidenceUpload = () => {
 
     setDragActive(false);
   };
-
-  // ==========================================================
-  // DROP
-  // ==========================================================
 
   const handleDrop = (
     event
@@ -618,37 +1184,31 @@ const EvidenceUpload = () => {
   };
 
   // ==========================================================
-  // REFRESH DOCUMENTS FROM BACKEND
+  // REFRESH DOCUMENTS
   // ==========================================================
 
-  const refreshDocuments = async () => {
-    try {
-      setRefreshingDocuments(true);
+  const refreshDocuments =
+    async () => {
+      try {
+        const data =
+          await documentService.getDocuments();
 
-      const data =
-        await documentService.getDocuments();
-
-      setDocuments(
-        Array.isArray(data)
-          ? data
-          : []
-      );
-
-      return data;
-    } catch (err) {
-      console.error(
-        "REFRESH DOCUMENTS ERROR:",
-        err?.response?.data || err
-      );
-
-      return null;
-    } finally {
-      setRefreshingDocuments(false);
-    }
-  };
+        setDocuments(
+          Array.isArray(data)
+            ? data
+            : []
+        );
+      } catch (err) {
+        console.error(
+          "REFRESH DOCUMENTS ERROR:",
+          err?.response?.data ||
+            err
+        );
+      }
+    };
 
   // ==========================================================
-  // UPLOAD
+  // UPLOAD EVIDENCE
   // ==========================================================
 
   const handleUpload = async () => {
@@ -656,9 +1216,27 @@ const EvidenceUpload = () => {
     setMessage("");
     setUploadedDocument(null);
 
-    // --------------------------------------------------------
-    // REQUIRED VALIDATION
-    // --------------------------------------------------------
+    console.log(
+      "UPLOAD START DATA:",
+      {
+        criterionId:
+          selectedCriterionId,
+
+        metricId:
+          selectedMetricId,
+
+        metricCode:
+          selectedMetric?.code,
+
+        submissionId:
+          selectedSubmissionId,
+
+        submission:
+          selectedSubmission,
+
+        file,
+      }
+    );
 
     if (!selectedCriterionId) {
       setError(
@@ -695,16 +1273,23 @@ const EvidenceUpload = () => {
       return;
     }
 
+    if (
+      !isEditableStatus(
+        selectedSubmission.status
+      )
+    ) {
+      setError(
+        `Submission #${selectedSubmission.id} is not editable because its status is "${selectedSubmission.status}".`
+      );
+      return;
+    }
+
     if (!file) {
       setError(
         "Please select an evidence file."
       );
       return;
     }
-
-    // --------------------------------------------------------
-    // FILE VALIDATION
-    // --------------------------------------------------------
 
     const validationError =
       validateFile(file);
@@ -720,8 +1305,13 @@ const EvidenceUpload = () => {
       setUploading(true);
       setUploadProgress(0);
 
+      const metricCode =
+        selectedMetric?.code ||
+        selectedSubmission.metric_code ||
+        "Evidence";
+
       const title =
-        `${selectedMetric.code} - ${file.name}`;
+        `${metricCode} - ${file.name}`;
 
       const result =
         await documentService.uploadEvidence(
@@ -737,7 +1327,8 @@ const EvidenceUpload = () => {
                   (
                     progressEvent.loaded /
                     progressEvent.total
-                  ) * 100
+                  ) *
+                    100
                 );
 
               setUploadProgress(
@@ -750,30 +1341,28 @@ const EvidenceUpload = () => {
           }
         );
 
-      // ------------------------------------------------------
-      // SUCCESS
-      // ------------------------------------------------------
+      console.log(
+        "EVIDENCE UPLOAD RESPONSE:",
+        result
+      );
 
       setUploadedDocument(
         result
       );
 
       setMessage(
-        "Evidence uploaded successfully."
+        `Evidence uploaded successfully and attached to Submission #${selectedSubmission.id}.`
       );
 
       setFile(null);
       setUploadProgress(100);
 
-      // ------------------------------------------------------
-      // REFRESH FROM DATABASE
-      // ------------------------------------------------------
-
       await refreshDocuments();
     } catch (err) {
       console.error(
         "EVIDENCE UPLOAD ERROR:",
-        err?.response?.data || err
+        err?.response?.data ||
+          err
       );
 
       setUploadProgress(0);
@@ -817,15 +1406,11 @@ const EvidenceUpload = () => {
         color: "#1e293b",
       }}
     >
-      {/* ======================================================
-          BACK
-      ====================================================== */}
+      {/* BACK */}
 
       <button
         onClick={() =>
-          navigate(
-            "/documents"
-          )
+          navigate("/documents")
         }
         style={{
           display: "flex",
@@ -843,9 +1428,7 @@ const EvidenceUpload = () => {
         Back to Evidence Repository
       </button>
 
-      {/* ======================================================
-          HEADER
-      ====================================================== */}
+      {/* HEADER */}
 
       <div
         style={{
@@ -880,26 +1463,101 @@ const EvidenceUpload = () => {
 
         <p
           style={{
-            margin:
-              "8px 0 0",
+            margin: "8px 0 0",
             opacity: 0.85,
             fontSize: "14px",
           }}
         >
-          Link a real supporting document to
-          an NAAC metric submission.
+          Link a real supporting
+          document to an editable
+          NAAC metric submission.
         </p>
       </div>
 
-      {/* ======================================================
-          ERROR
-      ====================================================== */}
+      {/* URL SUBMISSION */}
+
+      {urlSubmission && (
+        <div
+          style={{
+            marginBottom: "18px",
+            padding: "16px 18px",
+            border:
+              "1px solid #bfdbfe",
+            background: "#eff6ff",
+            borderRadius: "10px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "9px",
+              color: "#1d4ed8",
+              fontWeight: 700,
+              marginBottom: "6px",
+            }}
+          >
+            <FileText size={18} />
+
+            Evidence for Submission #
+            {urlSubmission.id}
+          </div>
+
+          <div
+            style={{
+              fontSize: "13px",
+              color: "#475569",
+            }}
+          >
+            {urlSubmission.title}
+          </div>
+
+          <div
+            style={{
+              marginTop: "5px",
+              fontSize: "12px",
+              color: "#64748b",
+            }}
+          >
+            Status:{" "}
+            <strong>
+              {urlSubmission.status}
+            </strong>
+          </div>
+        </div>
+      )}
+
+      {/* URL NOT FOUND */}
+
+      {urlSubmissionId &&
+        !urlSubmission && (
+          <div
+            style={{
+              marginBottom: "16px",
+              padding: "13px 15px",
+              border:
+                "1px solid #fde68a",
+              background: "#fffbeb",
+              color: "#92400e",
+              borderRadius: "9px",
+              fontSize: "13px",
+            }}
+          >
+            Submission #
+            {urlSubmissionId} was not
+            returned by the submissions
+            API.
+          </div>
+        )}
+
+      {/* ERROR */}
 
       {error && (
         <div
           style={{
             display: "flex",
-            alignItems: "flex-start",
+            alignItems:
+              "flex-start",
             gap: "10px",
             padding: "13px 15px",
             marginBottom: "16px",
@@ -912,27 +1570,20 @@ const EvidenceUpload = () => {
         >
           <XCircle
             size={18}
-            style={{
-              flexShrink: 0,
-              marginTop: "1px",
-            }}
           />
 
-          <span>
-            {error}
-          </span>
+          <span>{error}</span>
         </div>
       )}
 
-      {/* ======================================================
-          SUCCESS
-      ====================================================== */}
+      {/* SUCCESS */}
 
       {message && (
         <div
           style={{
             display: "flex",
-            alignItems: "flex-start",
+            alignItems:
+              "flex-start",
             gap: "10px",
             padding: "13px 15px",
             marginBottom: "16px",
@@ -947,19 +1598,15 @@ const EvidenceUpload = () => {
             size={18}
           />
 
-          <span>
-            {message}
-          </span>
+          <span>{message}</span>
         </div>
       )}
 
       {/* ======================================================
-          1. SELECT CRITERION
+          1. CRITERION
       ====================================================== */}
 
-      <div
-        style={cardStyle}
-      >
+      <div style={cardStyle}>
         <SectionHeading
           number="1"
           title="Select Criterion"
@@ -973,7 +1620,10 @@ const EvidenceUpload = () => {
           onChange={
             handleCriterionChange
           }
-          disabled={uploading}
+          disabled={
+            uploading ||
+            Boolean(urlSubmission)
+          }
           style={inputStyle}
         >
           <option value="">
@@ -995,16 +1645,14 @@ const EvidenceUpload = () => {
       </div>
 
       {/* ======================================================
-          2. SELECT METRIC
+          2. METRIC
       ====================================================== */}
 
-      <div
-        style={cardStyle}
-      >
+      <div style={cardStyle}>
         <SectionHeading
           number="2"
           title="Select Metric"
-          description="Select the metric for which this evidence is being uploaded."
+          description="Select the metric to which this evidence belongs."
         />
 
         <select
@@ -1017,15 +1665,10 @@ const EvidenceUpload = () => {
           disabled={
             !selectedCriterionId ||
             loadingMetrics ||
-            uploading
+            uploading ||
+            Boolean(urlSubmission)
           }
-          style={{
-            ...inputStyle,
-            background:
-              !selectedCriterionId
-                ? "#f8fafc"
-                : "#ffffff",
-          }}
+          style={inputStyle}
         >
           <option value="">
             {loadingMetrics
@@ -1056,10 +1699,11 @@ const EvidenceUpload = () => {
             style={{
               marginTop: "14px",
               padding: "14px",
-              background: "#f8fafc",
-              borderRadius: "9px",
+              background:
+                "#f8fafc",
               border:
                 "1px solid #e2e8f0",
+              borderRadius: "9px",
             }}
           >
             <div
@@ -1075,7 +1719,6 @@ const EvidenceUpload = () => {
               style={{
                 color: "#64748b",
                 fontSize: "13px",
-                lineHeight: 1.5,
               }}
             >
               {selectedMetric.description ||
@@ -1090,9 +1733,7 @@ const EvidenceUpload = () => {
       ====================================================== */}
 
       {selectedMetric && (
-        <div
-          style={cardStyle}
-        >
+        <div style={cardStyle}>
           <SectionHeading
             number="3"
             title="Evidence Requirement"
@@ -1104,71 +1745,36 @@ const EvidenceUpload = () => {
               style={{
                 border:
                   "1px solid #dbeafe",
-                background: "#eff6ff",
+                background:
+                  "#eff6ff",
                 borderRadius: "10px",
                 padding: "17px",
               }}
             >
               <div
                 style={{
-                  display: "flex",
-                  justifyContent:
-                    "space-between",
-                  gap: "15px",
-                  alignItems:
-                    "flex-start",
+                  fontWeight: 700,
+                  fontSize: "16px",
                 }}
               >
-                <div>
-                  <div
-                    style={{
-                      fontWeight: 700,
-                      fontSize: "16px",
-                    }}
-                  >
-                    {
-                      selectedEvidenceRequirement.title
-                    }
-                  </div>
-
-                  {selectedEvidenceRequirement.description && (
-                    <div
-                      style={{
-                        color: "#475569",
-                        fontSize: "13px",
-                        lineHeight: 1.5,
-                        marginTop: "7px",
-                      }}
-                    >
-                      {
-                        selectedEvidenceRequirement.description
-                      }
-                    </div>
-                  )}
-                </div>
-
-                {selectedEvidenceRequirement.required && (
-                  <span
-                    style={{
-                      padding:
-                        "5px 10px",
-                      borderRadius:
-                        "999px",
-                      background:
-                        "#fee2e2",
-                      color:
-                        "#b91c1c",
-                      fontSize:
-                        "11px",
-                      fontWeight: 700,
-                      whiteSpace:
-                        "nowrap",
-                    }}
-                  >
-                    REQUIRED
-                  </span>
-                )}
+                {
+                  selectedEvidenceRequirement.title
+                }
               </div>
+
+              {selectedEvidenceRequirement.description && (
+                <div
+                  style={{
+                    color: "#475569",
+                    fontSize: "13px",
+                    marginTop: "7px",
+                  }}
+                >
+                  {
+                    selectedEvidenceRequirement.description
+                  }
+                </div>
+              )}
 
               <div
                 style={{
@@ -1213,32 +1819,32 @@ const EvidenceUpload = () => {
             <div
               style={{
                 padding: "16px",
-                background: "#fffbeb",
+                background:
+                  "#fffbeb",
                 border:
                   "1px solid #fde68a",
                 borderRadius: "9px",
                 color: "#92400e",
               }}
             >
-              No evidence requirement is
-              configured for this metric.
+              No evidence requirement
+              is configured for this
+              metric.
             </div>
           )}
         </div>
       )}
 
       {/* ======================================================
-          4. SELECT SUBMISSION
+          4. SUBMISSION
       ====================================================== */}
 
       {selectedMetric && (
-        <div
-          style={cardStyle}
-        >
+        <div style={cardStyle}>
           <SectionHeading
             number="4"
             title="Select Submission"
-            description="Evidence can only be uploaded to an editable submission."
+            description="Evidence is attached to an editable submission."
           />
 
           <select
@@ -1248,11 +1854,15 @@ const EvidenceUpload = () => {
             onChange={
               handleSubmissionChange
             }
-            disabled={uploading}
+            disabled={
+              uploading ||
+              Boolean(urlSubmission)
+            }
             style={inputStyle}
           >
             <option value="">
-              Select Editable Submission
+              Select Editable
+              Submission
             </option>
 
             {editableSubmissions.map(
@@ -1271,25 +1881,39 @@ const EvidenceUpload = () => {
           </select>
 
           {editableSubmissions.length ===
-            0 && (
-            <div
-              style={{
-                marginTop: "12px",
-                padding: "13px",
-                background: "#f8fafc",
-                border:
-                  "1px solid #e2e8f0",
-                borderRadius: "8px",
-                color: "#64748b",
-                fontSize: "13px",
-              }}
-            >
-              No editable submission exists
-              for this metric. Create a draft
-              submission first from the metric
-              page.
-            </div>
-          )}
+            0 &&
+            !urlSubmission && (
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "13px",
+                  background:
+                    "#f8fafc",
+                  border:
+                    "1px solid #e2e8f0",
+                  borderRadius: "8px",
+                  color: "#64748b",
+                  fontSize: "13px",
+                }}
+              >
+                <div
+                  style={{
+                    fontWeight: 600,
+                    color: "#475569",
+                    marginBottom: "4px",
+                  }}
+                >
+                  No editable submission
+                  exists for this metric.
+                </div>
+
+                <div>
+                  Create a Draft
+                  submission first from
+                  the metric page.
+                </div>
+              </div>
+            )}
 
           {selectedSubmission && (
             <div
@@ -1315,7 +1939,9 @@ const EvidenceUpload = () => {
 
               <MiniInfo
                 label="Files"
-                value={existingFileCount}
+                value={
+                  existingFileCount
+                }
               />
             </div>
           )}
@@ -1323,358 +1949,322 @@ const EvidenceUpload = () => {
       )}
 
       {/* ======================================================
-          5. FILE UPLOAD
+          5. UPLOAD
       ====================================================== */}
 
-      {selectedSubmission && (
-        <div
-          style={cardStyle}
-        >
-          <SectionHeading
-            number="5"
-            title="Upload File"
-            description="Choose the real evidence document you want to attach."
-          />
-
-          <div
-            onDragOver={
-              handleDragOver
-            }
-            onDragLeave={
-              handleDragLeave
-            }
-            onDrop={
-              handleDrop
-            }
-            style={{
-              border:
-                dragActive
-                  ? "2px solid #2563eb"
-                  : "2px dashed #cbd5e1",
-              borderRadius: "12px",
-              padding: "34px 20px",
-              textAlign: "center",
-              background:
-                dragActive
-                  ? "#eff6ff"
-                  : "#f8fafc",
-              transition:
-                "all 0.2s ease",
-              opacity:
-                uploading
-                  ? 0.7
-                  : 1,
-            }}
-          >
-            <UploadCloud
-              size={38}
-              color="#2563eb"
-              style={{
-                marginBottom: "10px",
-              }}
+      {selectedSubmission &&
+        isEditableStatus(
+          selectedSubmission.status
+        ) && (
+          <div style={cardStyle}>
+            <SectionHeading
+              number="5"
+              title="Upload Evidence"
+              description="Upload the real supporting document and attach it to this submission."
             />
 
             <div
+              onDragOver={
+                handleDragOver
+              }
+              onDragLeave={
+                handleDragLeave
+              }
+              onDrop={handleDrop}
               style={{
-                fontWeight: 700,
-                fontSize: "16px",
-              }}
-            >
-              Drag & drop your evidence
-              file here
-            </div>
-
-            <div
-              style={{
-                color: "#64748b",
-                fontSize: "13px",
-                margin:
-                  "7px 0 16px",
-              }}
-            >
-              or choose a file from your
-              computer
-            </div>
-
-            <label
-              style={{
-                display:
-                  "inline-flex",
-                alignItems:
-                  "center",
-                gap: "7px",
-                padding:
-                  "10px 16px",
-                borderRadius:
-                  "8px",
-                background:
-                  uploading
-                    ? "#94a3b8"
-                    : "#2563eb",
-                color:
-                  "#ffffff",
-                fontWeight:
-                  600,
-                cursor:
-                  uploading
-                    ? "not-allowed"
-                    : "pointer",
-              }}
-            >
-              <FileText
-                size={16}
-              />
-
-              Choose File
-
-              <input
-                type="file"
-                accept={
-                  acceptAttribute
-                }
-                disabled={
-                  uploading
-                }
-                onChange={
-                  handleFileInputChange
-                }
-                style={{
-                  display: "none",
-                }}
-              />
-            </label>
-
-            <div
-              style={{
-                marginTop: "14px",
-                fontSize: "12px",
-                color: "#64748b",
-              }}
-            >
-              Allowed formats:{" "}
-              {allowedExtensions
-                .map(
-                  (item) =>
-                    item.toUpperCase()
-                )
-                .join(", ")}
-            </div>
-          </div>
-
-          {/* ==================================================
-              SELECTED FILE
-          ================================================== */}
-
-          {file && (
-            <div
-              style={{
-                marginTop: "15px",
-                padding: "14px",
                 border:
-                  "1px solid #dbeafe",
-                background: "#eff6ff",
-                borderRadius: "9px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent:
-                  "space-between",
-                gap: "15px",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems:
-                    "center",
-                  gap: "10px",
-                  minWidth: 0,
-                }}
-              >
-                <FileText
-                  size={20}
-                  color="#2563eb"
-                />
-
-                <div
-                  style={{
-                    minWidth: 0,
-                  }}
-                >
-                  <div
-                    style={{
-                      fontWeight: 600,
-                      overflow:
-                        "hidden",
-                      textOverflow:
-                        "ellipsis",
-                      whiteSpace:
-                        "nowrap",
-                    }}
-                  >
-                    {file.name}
-                  </div>
-
-                  <div
-                    style={{
-                      fontSize: "12px",
-                      color: "#64748b",
-                      marginTop: "3px",
-                    }}
-                  >
-                    {formatBytes(
-                      file.size
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {!uploading && (
-                <button
-                  onClick={() => {
-                    setFile(null);
-                    setError("");
-                    setUploadProgress(0);
-                  }}
-                  style={{
-                    border: "none",
-                    background:
-                      "transparent",
-                    color:
-                      "#64748b",
-                    cursor:
-                      "pointer",
-                  }}
-                >
-                  Remove
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* ==================================================
-              PROGRESS
-          ================================================== */}
-
-          {uploading && (
-            <div
-              style={{
-                marginTop: "18px",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent:
-                    "space-between",
-                  marginBottom:
-                    "7px",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                }}
-              >
-                <span>
-                  Uploading evidence...
-                </span>
-
-                <span>
-                  {uploadProgress}%
-                </span>
-              </div>
-
-              <div
-                style={{
-                  height: "9px",
-                  background:
-                    "#e2e8f0",
-                  borderRadius:
-                    "999px",
-                  overflow:
-                    "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    width: `${uploadProgress}%`,
-                    height: "100%",
-                    background:
-                      "#2563eb",
-                    borderRadius:
-                      "999px",
-                    transition:
-                      "width 0.2s ease",
-                  }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* ==================================================
-              UPLOAD BUTTON
-          ================================================== */}
-
-          <div
-            style={{
-              marginTop: "20px",
-              display: "flex",
-              justifyContent:
-                "flex-end",
-            }}
-          >
-            <button
-              onClick={
-                handleUpload
-              }
-              disabled={
-                uploading ||
-                !file ||
-                !selectedSubmission ||
-                !selectedEvidenceRequirement
-              }
-              style={{
-                display:
-                  "flex",
-                alignItems:
-                  "center",
-                gap: "8px",
+                  dragActive
+                    ? "2px solid #2563eb"
+                    : "2px dashed #cbd5e1",
+                borderRadius: "12px",
                 padding:
-                  "11px 19px",
-                border: "none",
-                borderRadius:
-                  "8px",
+                  "34px 20px",
+                textAlign: "center",
                 background:
-                  uploading ||
-                  !file ||
-                  !selectedSubmission ||
-                  !selectedEvidenceRequirement
-                    ? "#cbd5e1"
-                    : "#0f766e",
-                color:
-                  "#ffffff",
-                cursor:
-                  uploading ||
-                  !file ||
-                  !selectedSubmission ||
-                  !selectedEvidenceRequirement
-                    ? "not-allowed"
-                    : "pointer",
-                fontWeight:
-                  700,
+                  dragActive
+                    ? "#eff6ff"
+                    : "#f8fafc",
               }}
             >
               <UploadCloud
-                size={17}
+                size={38}
+                color="#2563eb"
               />
 
-              {uploading
-                ? "Uploading..."
-                : "Upload Evidence"}
-            </button>
+              <div
+                style={{
+                  fontWeight: 700,
+                  fontSize: "16px",
+                  marginTop: "10px",
+                }}
+              >
+                Drag & drop your
+                evidence file here
+              </div>
+
+              <div
+                style={{
+                  color: "#64748b",
+                  fontSize: "13px",
+                  margin:
+                    "7px 0 16px",
+                }}
+              >
+                or choose a file from
+                your computer
+              </div>
+
+              <label
+                style={{
+                  display:
+                    "inline-flex",
+                  alignItems:
+                    "center",
+                  gap: "7px",
+                  padding:
+                    "10px 16px",
+                  borderRadius: "8px",
+                  background:
+                    uploading
+                      ? "#94a3b8"
+                      : "#2563eb",
+                  color: "#ffffff",
+                  fontWeight: 600,
+                  cursor:
+                    uploading
+                      ? "not-allowed"
+                      : "pointer",
+                }}
+              >
+                <FileText size={16} />
+
+                Choose File
+
+                <input
+                  type="file"
+                  accept={
+                    acceptAttribute
+                  }
+                  disabled={
+                    uploading
+                  }
+                  onChange={
+                    handleFileInputChange
+                  }
+                  style={{
+                    display: "none",
+                  }}
+                />
+              </label>
+
+              <div
+                style={{
+                  marginTop: "14px",
+                  fontSize: "12px",
+                  color: "#64748b",
+                }}
+              >
+                Allowed formats:{" "}
+                {allowedExtensions
+                  .map(
+                    (item) =>
+                      item.toUpperCase()
+                  )
+                  .join(", ")}
+              </div>
+            </div>
+
+            {file && (
+              <div
+                style={{
+                  marginTop: "15px",
+                  padding: "14px",
+                  border:
+                    "1px solid #dbeafe",
+                  background:
+                    "#eff6ff",
+                  borderRadius: "9px",
+                  display: "flex",
+                  justifyContent:
+                    "space-between",
+                  alignItems:
+                    "center",
+                }}
+              >
+                <div
+                  style={{
+                    display:
+                      "flex",
+                    alignItems:
+                      "center",
+                    gap: "10px",
+                  }}
+                >
+                  <FileText
+                    size={20}
+                    color="#2563eb"
+                  />
+
+                  <div>
+                    <div
+                      style={{
+                        fontWeight: 600,
+                      }}
+                    >
+                      {file.name}
+                    </div>
+
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: "#64748b",
+                      }}
+                    >
+                      {formatBytes(
+                        file.size
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {!uploading && (
+                  <button
+                    onClick={() => {
+                      setFile(null);
+                      setError("");
+                      setUploadProgress(
+                        0
+                      );
+                    }}
+                    style={{
+                      border: "none",
+                      background:
+                        "transparent",
+                      color:
+                        "#64748b",
+                      cursor:
+                        "pointer",
+                    }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            )}
+
+            {uploading && (
+              <div
+                style={{
+                  marginTop: "18px",
+                }}
+              >
+                <div
+                  style={{
+                    display:
+                      "flex",
+                    justifyContent:
+                      "space-between",
+                    marginBottom: "7px",
+                    fontSize: "13px",
+                    fontWeight: 600,
+                  }}
+                >
+                  <span>
+                    Uploading evidence...
+                  </span>
+
+                  <span>
+                    {uploadProgress}%
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    height: "9px",
+                    background:
+                      "#e2e8f0",
+                    borderRadius:
+                      "999px",
+                    overflow:
+                      "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${uploadProgress}%`,
+                      height: "100%",
+                      background:
+                        "#2563eb",
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            <div
+              style={{
+                marginTop: "20px",
+                display:
+                  "flex",
+                justifyContent:
+                  "flex-end",
+              }}
+            >
+              <button
+                onClick={
+                  handleUpload
+                }
+                disabled={
+                  uploading ||
+                  !file ||
+                  !selectedSubmission ||
+                  !selectedEvidenceRequirement
+                }
+                style={{
+                  display:
+                    "flex",
+                  alignItems:
+                    "center",
+                  gap: "8px",
+                  padding:
+                    "11px 19px",
+                  border: "none",
+                  borderRadius:
+                    "8px",
+                  background:
+                    uploading ||
+                    !file ||
+                    !selectedSubmission ||
+                    !selectedEvidenceRequirement
+                      ? "#cbd5e1"
+                      : "#0f766e",
+                  color:
+                    "#ffffff",
+                  cursor:
+                    uploading ||
+                    !file ||
+                    !selectedSubmission ||
+                    !selectedEvidenceRequirement
+                      ? "not-allowed"
+                      : "pointer",
+                  fontWeight:
+                    700,
+                }}
+              >
+                <UploadCloud
+                  size={17}
+                />
+
+                {uploading
+                  ? "Uploading..."
+                  : "Upload Evidence"}
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
       {/* ======================================================
-          SUCCESS CARD
+          SUCCESS
       ====================================================== */}
 
       {uploadedDocument && (
@@ -1682,7 +2272,8 @@ const EvidenceUpload = () => {
           style={{
             marginTop: "20px",
             padding: "18px",
-            background: "#f0fdf4",
+            background:
+              "#f0fdf4",
             border:
               "1px solid #bbf7d0",
             borderRadius: "10px",
@@ -1690,11 +2281,15 @@ const EvidenceUpload = () => {
         >
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
+              display:
+                "flex",
+              alignItems:
+                "center",
               gap: "9px",
-              color: "#166534",
-              fontWeight: 700,
+              color:
+                "#166534",
+              fontWeight:
+                700,
             }}
           >
             <CheckCircle
@@ -1708,102 +2303,74 @@ const EvidenceUpload = () => {
           <div
             style={{
               marginTop: "8px",
-              color: "#475569",
-              fontSize: "13px",
+              fontSize:
+                "13px",
+              color:
+                "#475569",
             }}
           >
-            {uploadedDocument.title}
+            {
+              uploadedDocument.title
+            }
           </div>
 
           <div
             style={{
               marginTop: "6px",
-              color: "#64748b",
-              fontSize: "12px",
+              fontSize:
+                "12px",
+              color:
+                "#64748b",
             }}
           >
             Document ID: #
-            {uploadedDocument.id}
+            {
+              uploadedDocument.id
+            }
           </div>
 
           <div
             style={{
-              display: "flex",
-              gap: "10px",
-              marginTop: "13px",
+              marginTop: "6px",
+              fontSize:
+                "12px",
+              color:
+                "#64748b",
             }}
           >
-            <button
-              onClick={() =>
-                navigate(
-                  "/documents"
-                )
-              }
-              style={{
-                padding:
-                  "8px 13px",
-                border:
-                  "1px solid #bbf7d0",
-                borderRadius:
-                  "7px",
-                background:
-                  "#ffffff",
-                color:
-                  "#166534",
-                cursor:
-                  "pointer",
-                fontWeight:
-                  600,
-              }}
-            >
-              View Evidence Repository
-            </button>
-
-            <button
-              onClick={() => {
-                setUploadedDocument(
-                  null
-                );
-                setMessage("");
-                setUploadProgress(0);
-              }}
-              style={{
-                padding:
-                  "8px 13px",
-                border:
-                  "1px solid #cbd5e1",
-                borderRadius:
-                  "7px",
-                background:
-                  "#ffffff",
-                color:
-                  "#475569",
-                cursor:
-                  "pointer",
-                fontWeight:
-                  600,
-              }}
-            >
-              Upload Another
-            </button>
+            Attached to Submission #
+            {
+              selectedSubmission?.id
+            }
           </div>
-        </div>
-      )}
 
-      {/* ======================================================
-          REFRESH STATUS
-      ====================================================== */}
-
-      {refreshingDocuments && (
-        <div
-          style={{
-            marginTop: "12px",
-            color: "#64748b",
-            fontSize: "12px",
-            textAlign: "right",
-          }}
-        >
-          Refreshing evidence repository...
+          <button
+            onClick={() =>
+              navigate(
+                "/documents"
+              )
+            }
+            style={{
+              marginTop: "14px",
+              padding:
+                "8px 13px",
+              border:
+                "1px solid #bbf7d0",
+              borderRadius:
+                "7px",
+              background:
+                "#ffffff",
+              color:
+                "#166534",
+              cursor:
+                "pointer",
+              fontWeight:
+                600,
+            }}
+          >
+            View Evidence
+            Repository
+          </button>
         </div>
       )}
     </div>
@@ -1811,7 +2378,7 @@ const EvidenceUpload = () => {
 };
 
 // ============================================================
-// REUSABLE COMPONENTS
+// SECTION HEADING
 // ============================================================
 
 const SectionHeading = ({
@@ -1821,23 +2388,33 @@ const SectionHeading = ({
 }) => (
   <div
     style={{
-      display: "flex",
+      display:
+        "flex",
       gap: "12px",
-      marginBottom: "17px",
+      marginBottom:
+        "17px",
     }}
   >
     <div
       style={{
         width: "30px",
         height: "30px",
-        borderRadius: "50%",
-        background: "#eff6ff",
-        color: "#2563eb",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontWeight: 700,
-        fontSize: "13px",
+        borderRadius:
+          "50%",
+        background:
+          "#eff6ff",
+        color:
+          "#2563eb",
+        display:
+          "flex",
+        alignItems:
+          "center",
+        justifyContent:
+          "center",
+        fontWeight:
+          700,
+        fontSize:
+          "13px",
         flexShrink: 0,
       }}
     >
@@ -1848,7 +2425,8 @@ const SectionHeading = ({
       <h2
         style={{
           margin: 0,
-          fontSize: "18px",
+          fontSize:
+            "18px",
         }}
       >
         {title}
@@ -1858,8 +2436,10 @@ const SectionHeading = ({
         style={{
           margin:
             "4px 0 0",
-          color: "#64748b",
-          fontSize: "13px",
+          color:
+            "#64748b",
+          fontSize:
+            "13px",
         }}
       >
         {description}
@@ -1868,22 +2448,32 @@ const SectionHeading = ({
   </div>
 );
 
+// ============================================================
+// MINI INFO
+// ============================================================
+
 const MiniInfo = ({
   label,
   value,
 }) => (
   <div
     style={{
-      background: "#f8fafc",
-      borderRadius: "8px",
-      padding: "11px",
+      background:
+        "#f8fafc",
+      borderRadius:
+        "8px",
+      padding:
+        "11px",
     }}
   >
     <div
       style={{
-        color: "#64748b",
-        fontSize: "11px",
-        marginBottom: "3px",
+        color:
+          "#64748b",
+        fontSize:
+          "11px",
+        marginBottom:
+          "3px",
       }}
     >
       {label}
@@ -1891,7 +2481,8 @@ const MiniInfo = ({
 
     <strong
       style={{
-        fontSize: "14px",
+        fontSize:
+          "14px",
       }}
     >
       {value}
@@ -1900,110 +2491,41 @@ const MiniInfo = ({
 );
 
 // ============================================================
-// ERROR MESSAGE HELPER
-// ============================================================
-
-const getErrorMessage = (
-  error,
-  fallback
-) => {
-  const detail =
-    error?.response?.data?.detail;
-
-  if (typeof detail === "string") {
-    return detail;
-  }
-
-  if (
-    Array.isArray(detail)
-  ) {
-    return detail
-      .map(
-        (item) =>
-          item?.msg ||
-          String(item)
-      )
-      .join(", ");
-  }
-
-  if (
-    error?.message &&
-    typeof error.message ===
-      "string"
-  ) {
-    return error.message;
-  }
-
-  return fallback;
-};
-
-// ============================================================
-// FORMAT FILE SIZE
-// ============================================================
-
-const formatBytes = (
-  bytes
-) => {
-  if (!bytes) {
-    return "0 B";
-  }
-
-  if (
-    bytes <
-    1024
-  ) {
-    return `${bytes} B`;
-  }
-
-  if (
-    bytes <
-    1024 * 1024
-  ) {
-    return `${(
-      bytes / 1024
-    ).toFixed(1)} KB`;
-  }
-
-  if (
-    bytes <
-    1024 * 1024 * 1024
-  ) {
-    return `${(
-      bytes /
-      (1024 * 1024)
-    ).toFixed(1)} MB`;
-  }
-
-  return `${(
-    bytes /
-    (1024 * 1024 * 1024)
-  ).toFixed(1)} GB`;
-};
-
-// ============================================================
 // STYLES
 // ============================================================
 
 const cardStyle = {
-  background: "#ffffff",
+  background:
+    "#ffffff",
   border:
     "1px solid #e2e8f0",
-  borderRadius: "12px",
-  padding: "22px",
-  marginBottom: "18px",
+  borderRadius:
+    "12px",
+  padding:
+    "22px",
+  marginBottom:
+    "18px",
 };
 
 const inputStyle = {
-  width: "100%",
-  boxSizing: "border-box",
-  padding: "11px 13px",
+  width:
+    "100%",
+  boxSizing:
+    "border-box",
+  padding:
+    "11px 13px",
   border:
     "1px solid #cbd5e1",
-  borderRadius: "8px",
-  background: "#ffffff",
-  color: "#1e293b",
-  fontSize: "14px",
-  outline: "none",
+  borderRadius:
+    "8px",
+  background:
+    "#ffffff",
+  color:
+    "#1e293b",
+  fontSize:
+    "14px",
+  outline:
+    "none",
 };
 
 export default EvidenceUpload;
